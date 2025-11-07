@@ -3,7 +3,11 @@ const router = express.Router();
 const ownerController = require('../controllers/ownerController');
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
+<<<<<<< HEAD
 const labOwnerController=require('../controllers/ownerController');
+=======
+
+>>>>>>> Motaz
 // ==================== AUTHENTICATION ROUTES ====================
 
 /**
@@ -13,12 +17,15 @@ const labOwnerController=require('../controllers/ownerController');
  */
 router.post('/login', ownerController.login);
 
+<<<<<<< HEAD
 // Lab Owner Request Access
 // POST /api/owner/request-access
 router.post('/request-access', labOwnerController.requestAccess);
 
 
 
+=======
+>>>>>>> Motaz
 /**
  * @route   GET /api/owner/profile
  * @desc    Get owner profile
