@@ -18,28 +18,6 @@ const jwt = require('jsonwebtoken');
  * @route   POST /api/owner/login
  * @access  Public
  */
-<<<<<<< HEAD
-
-
-// ==================== LAB OWNER LOGIN ====================
-exports.login = async (req, res, next) => {
-  try {
-    const { username, password } = req.body;
-    if (!username || !password) return res.status(400).json({ message: '⚠️ Username and password are required' });
-
-    const owner = await LabOwner.findOne({ username });
-    if (!owner) return res.status(401).json({ message: '❌ Invalid credentials' });
-
-    if (owner.status !== 'approved') return res.status(403).json({ message: '⚠️ Account is not approved yet.' });
-    if (!owner.is_active) return res.status(403).json({ message: '⚠️ Account is inactive. Please contact support.' });
-    if (owner.subscription_end && new Date() > new Date(owner.subscription_end)) return res.status(403).json({ message: '⚠️ Your subscription has expired. Please renew to continue.' });
-
-    const isMatch = await owner.comparePassword(password);
-    if (!isMatch) return res.status(401).json({ message: '❌ Invalid credentials' });
-
-    const token = jwt.sign(
-      { _id: owner._id, owner_id: owner.owner_id, role: 'owner', username: owner.username },
-=======
 exports.login = async (req, res, next) => {
   try {
     const { username, password } = req.body;
@@ -83,7 +61,6 @@ exports.login = async (req, res, next) => {
         role: 'owner',
         username: owner.username 
       },
->>>>>>> Motaz
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -100,7 +77,6 @@ exports.login = async (req, res, next) => {
         subscription_end: owner.subscription_end
       }
     });
-<<<<<<< HEAD
 
   } catch (err) {
     next(err);
@@ -164,8 +140,6 @@ exports.requestAccess = async (req, res, next) => {
       labOwner: newRequest
     });
 
-=======
->>>>>>> Motaz
   } catch (err) {
     next(err);
   }
@@ -1493,8 +1467,4 @@ exports.getPatientById = async (req, res, next) => {
   }
 };
 
-<<<<<<< HEAD
-
-=======
->>>>>>> Motaz
 module.exports = exports;
