@@ -14,7 +14,7 @@ router.post('/login', ownerController.login);
 
 // Lab Owner Request Access
 // POST /api/owner/request-access
-router.post('/request-access', labOwnerController.requestAccess);
+router.post('/request-access', ownerController.requestAccess);
 
 
 

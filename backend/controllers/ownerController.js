@@ -77,7 +77,6 @@ exports.login = async (req, res, next) => {
         subscription_end: owner.subscription_end
       }
     });
-<<<<<<< HEAD
 
   } catch (err) {
     next(err);
@@ -141,8 +140,6 @@ exports.requestAccess = async (req, res, next) => {
       labOwner: newRequest
     });
 
-=======
->>>>>>> Motaz
   } catch (err) {
     next(err);
   }
@@ -1470,8 +1467,4 @@ exports.getPatientById = async (req, res, next) => {
   }
 };
 
-<<<<<<< HEAD
-
-=======
->>>>>>> Motaz
 module.exports = exports;

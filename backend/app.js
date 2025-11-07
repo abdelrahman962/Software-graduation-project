@@ -36,10 +36,6 @@ app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/owner', require('./routes/ownerRoutes'));
 app.use('/api/patient', require('./routes/patientRoutes'));
 app.use('/api/staff', require('./routes/staffRoutes'));
-<<<<<<< HEAD
-app.use('api/doctor',require('./routes/doctorRoutes'));
-=======
->>>>>>> Motaz
 
 // Error Middleware
 app.use((err, req, res, next) => {
