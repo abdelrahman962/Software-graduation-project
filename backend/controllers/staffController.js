@@ -194,10 +194,7 @@ exports.reportIssue = async (req, res) => {
       created_at: new Date()
     });
 
-<<<<<<< HEAD
-=======
     // Optional: add audit log
->>>>>>> Motaz
     // await AuditLog.create({
     //   staff_id,
     //   action: `Reported ${issue_type} issue`,

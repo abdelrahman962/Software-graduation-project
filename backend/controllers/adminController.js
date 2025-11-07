@@ -4,11 +4,7 @@ const Admin = require('../models/Admin');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
-<<<<<<< HEAD
-// =================== AUTHENTICATION ====================
-=======
 // ==================== AUTHENTICATION ====================
->>>>>>> Motaz
 
 /**
  * @desc    Admin Login
