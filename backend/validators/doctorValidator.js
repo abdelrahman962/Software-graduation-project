@@ -1,0 +1,71 @@
+const { body, param, query } = require('express-validator');
+
+// Login Validation
+exports.validateLogin = [
+  body('username')
+    .trim()
+    .notEmpty().withMessage('Username is required')
+    .isLength({ min: 3, max: 100 }).withMessage('Username must be 3-100 characters')
+    .matches(/^[a-zA-Z0-9._@-]+$/).withMessage('Username contains invalid characters'),
+  
+  body('password')
+    .notEmpty().withMessage('Password is required')
+    .isLength({ min: 6, max: 100 }).withMessage('Password must be 6-100 characters')
+];
+
+// Request Test for Patient Validation
+exports.validateRequestTest = [
+  body('patient_id')
+    .trim()
+    .notEmpty().withMessage('Patient ID is required')
+    .isMongoId().withMessage('Invalid patient ID format'),
+  
+  body('owner_id')
+    .trim()
+    .notEmpty().withMessage('Lab ID is required')
+    .isMongoId().withMessage('Invalid lab ID format'),
+  
+  body('test_ids')
+    .isArray({ min: 1 }).withMessage('At least one test is required'),
+  
+  body('test_ids.*')
+    .isMongoId().withMessage('Invalid test ID format'),
+  
+  body('is_urgent')
+    .optional()
+    .isBoolean().withMessage('is_urgent must be true or false'),
+  
+  body('remarks')
+    .optional()
+    .trim()
+    .isLength({ max: 500 }).withMessage('Remarks must not exceed 500 characters')
+];
+
+// Mark Test Urgent Validation
+exports.validateMarkUrgent = [
+  param('order_id')
+    .trim()
+    .isMongoId().withMessage('Invalid order ID format')
+];
+
+// Get Patient Test History Validation
+exports.validatePatientId = [
+  param('patient_id')
+    .trim()
+    .isMongoId().withMessage('Invalid patient ID format')
+];
+
+// Search Patients Validation
+exports.validateSearchPatients = [
+  query('query')
+    .trim()
+    .notEmpty().withMessage('Search query is required')
+    .isLength({ min: 2, max: 100 }).withMessage('Search query must be 2-100 characters')
+];
+
+// Get Lab Tests Validation
+exports.validateLabId = [
+  param('lab_id')
+    .trim()
+    .isMongoId().withMessage('Invalid lab ID format')
+];

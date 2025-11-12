@@ -14,7 +14,8 @@ const authMiddleware = async (req, res, next) => {
     
     // Attach user info to request
     req.user = decoded;
-    
+    // console.log("Decoded JWT in authMiddleware:", decoded);
+
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {

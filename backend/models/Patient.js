@@ -18,13 +18,33 @@ const patientSchema = new mongoose.Schema({
   insurance_number: String,
   notes: String,
   email: { type: String, unique: true },
-  username: { type: String, unique: true },
+  username: { 
+    type: String, 
+    unique: true,
+    lowercase: true,
+    trim: true,
+    validate: {
+      validator: function(v) {
+        return /^[a-z0-9._-]+$/.test(v);
+      },
+      message: 'Username can only contain lowercase letters, numbers, dots, underscores, and hyphens (no spaces)'
+    }
+  },
   password: { type: String, required: true },
   created_by_staff: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
   created_at: { type: Date, default: Date.now },
   last_login: Date
 }, {
   timestamps: true
+});
+
+// Normalize username before saving
+patientSchema.pre('save', function(next) {
+  if (this.isModified('username')) {
+    // Remove spaces and convert to lowercase
+    this.username = this.username.replace(/\s+/g, '.').toLowerCase();
+  }
+  next();
 });
 
 // Hash password before saving

@@ -86,6 +86,13 @@ router.delete('/staff/:staffId', authMiddleware, roleMiddleware(['owner']), owne
 router.get('/devices', authMiddleware, roleMiddleware(['owner']), ownerController.getAllDevices);
 
 /**
+ * @route   GET /api/owner/devices/:deviceId
+ * @desc    Get single device
+ * @access  Private (Owner)
+ */
+router.get('/devices/:deviceId', authMiddleware, roleMiddleware(['owner']), ownerController.getDeviceById);
+
+/**
  * @route   POST /api/owner/devices
  * @desc    Add new device
  * @access  Private (Owner)
@@ -106,6 +113,13 @@ router.put('/devices/:deviceId', authMiddleware, roleMiddleware(['owner']), owne
  */
 router.delete('/devices/:deviceId', authMiddleware, roleMiddleware(['owner']), ownerController.deleteDevice);
 
+/**
+ * @route   POST /api/owner/assign-staff-to-device
+ * @desc    Assign or unassign staff to a device
+ * @access  Private (Owner)
+ */
+router.post('/assign-staff-to-device', authMiddleware, roleMiddleware(['owner']), ownerController.assignStaffToDevice);
+
 // ==================== TEST MANAGEMENT ROUTES ====================
 
 /**
@@ -114,6 +128,13 @@ router.delete('/devices/:deviceId', authMiddleware, roleMiddleware(['owner']), o
  * @access  Private (Owner)
  */
 router.get('/tests', authMiddleware, roleMiddleware(['owner']), ownerController.getAllTests);
+
+/**
+ * @route   GET /api/owner/tests/:testId
+ * @desc    Get single test
+ * @access  Private (Owner)
+ */
+router.get('/tests/:testId', authMiddleware, roleMiddleware(['owner']), ownerController.getTestById);
 
 /**
  * @route   POST /api/owner/tests
@@ -146,6 +167,13 @@ router.delete('/tests/:testId', authMiddleware, roleMiddleware(['owner']), owner
 router.get('/inventory', authMiddleware, roleMiddleware(['owner']), ownerController.getAllInventory);
 
 /**
+ * @route   GET /api/owner/inventory/:itemId
+ * @desc    Get single inventory item with transaction history
+ * @access  Private (Owner)
+ */
+router.get('/inventory/:itemId', authMiddleware, roleMiddleware(['owner']), ownerController.getInventoryById);
+
+/**
  * @route   POST /api/owner/inventory
  * @desc    Add inventory item
  * @access  Private (Owner)
@@ -165,6 +193,22 @@ router.put('/inventory/:itemId', authMiddleware, roleMiddleware(['owner']), owne
  * @access  Private (Owner)
  */
 router.delete('/inventory/:itemId', authMiddleware, roleMiddleware(['owner']), ownerController.deleteInventoryItem);
+
+// ==================== ORDER MANAGEMENT ROUTES ====================
+
+/**
+ * @route   GET /api/owner/orders
+ * @desc    Get all orders for this lab
+ * @access  Private (Owner)
+ */
+router.get('/orders', authMiddleware, roleMiddleware(['owner']), ownerController.getAllOrders);
+
+/**
+ * @route   GET /api/owner/orders/:orderId
+ * @desc    Get single order details
+ * @access  Private (Owner)
+ */
+router.get('/orders/:orderId', authMiddleware, roleMiddleware(['owner']), ownerController.getOrderById);
 
 // ==================== DASHBOARD & ANALYTICS ROUTES ====================
 
@@ -206,6 +250,13 @@ router.put('/notifications/:notificationId/read', authMiddleware, roleMiddleware
 router.post('/notifications/send', authMiddleware, roleMiddleware(['owner']), ownerController.sendNotificationToStaff);
 
 // ==================== ADMIN COMMUNICATION ROUTES ====================
+
+/**
+ * @route   POST /api/owner/request-renewal
+ * @desc    Request subscription renewal
+ * @access  Private (Owner)
+ */
+router.post('/request-renewal', authMiddleware, roleMiddleware(['owner']), ownerController.requestSubscriptionRenewal);
 
 /**
  * @route   POST /api/owner/contact-admin

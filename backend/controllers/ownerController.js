@@ -20,15 +20,18 @@ const jwt = require('jsonwebtoken');
  */
 exports.login = async (req, res, next) => {
   try {
-    const { username, password } = req.body;
+    let { username, password } = req.body;
 
     // Validate input
     if (!username || !password) {
       return res.status(400).json({ message: '⚠️ Username and password are required' });
     }
 
-    // Find owner by username
-    const owner = await LabOwner.findOne({ username });
+    // Normalize username (remove spaces, convert to lowercase)
+    const normalizedUsername = username.replace(/\s+/g, '.').toLowerCase().trim();
+
+    // Find owner by username or email
+    const owner = await LabOwner.findOne({ $or: [{ username: normalizedUsername }, { email: username }] });
     if (!owner) {
       return res.status(401).json({ message: '❌ Invalid credentials' });
     }
@@ -42,15 +45,29 @@ exports.login = async (req, res, next) => {
       return res.status(403).json({ message: '⚠️ Account is inactive. Please contact support.' });
     }
 
-    // Check if subscription has expired
-    if (owner.subscription_end && new Date() > new Date(owner.subscription_end)) {
-      return res.status(403).json({ message: '⚠️ Your subscription has expired. Please renew to continue.' });
-    }
-
     // Compare password
     const isMatch = await owner.comparePassword(password);
     if (!isMatch) {
       return res.status(401).json({ message: '❌ Invalid credentials' });
+    }
+
+    // Check subscription status and calculate days remaining
+    let subscriptionWarning = null;
+    let subscriptionExpired = false;
+    
+    if (owner.subscription_end) {
+      const today = new Date();
+      const endDate = new Date(owner.subscription_end);
+      const daysRemaining = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+
+      if (daysRemaining < 0) {
+        subscriptionExpired = true;
+        subscriptionWarning = `⚠️ Your subscription expired ${Math.abs(daysRemaining)} days ago. Limited access - please renew immediately.`;
+      } else if (daysRemaining <= 7) {
+        subscriptionWarning = `⚠️ Your subscription expires in ${daysRemaining} day(s). Please renew soon to avoid service interruption.`;
+      } else if (daysRemaining <= 30) {
+        subscriptionWarning = `ℹ️ Your subscription expires in ${daysRemaining} days.`;
+      }
     }
 
     // Generate JWT token
@@ -59,14 +76,17 @@ exports.login = async (req, res, next) => {
         _id: owner._id, 
         owner_id: owner.owner_id,
         role: 'owner',
-        username: owner.username 
+        username: owner.username,
+        subscription_expired: subscriptionExpired
       },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
     res.json({
-      message: '✅ Login successful',
+      message: subscriptionExpired 
+        ? '⚠️ Login successful - SUBSCRIPTION EXPIRED' 
+        : '✅ Login successful',
       token,
       owner: {
         _id: owner._id,
@@ -74,8 +94,10 @@ exports.login = async (req, res, next) => {
         name: owner.name,
         email: owner.email,
         username: owner.username,
-        subscription_end: owner.subscription_end
-      }
+        subscription_end: owner.subscription_end,
+        subscription_expired: subscriptionExpired
+      },
+      ...(subscriptionWarning && { warning: subscriptionWarning })
     });
 
   } catch (err) {
@@ -158,7 +180,45 @@ exports.getProfile = async (req, res, next) => {
       return res.status(404).json({ message: '❌ Owner not found' });
     }
 
-    res.json(owner);
+    // Calculate days until subscription expires
+    let subscriptionStatus = null;
+    if (owner.subscription_end) {
+      const today = new Date();
+      const endDate = new Date(owner.subscription_end);
+      const daysRemaining = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+
+      if (daysRemaining < 0) {
+        subscriptionStatus = {
+          status: 'expired',
+          daysRemaining: 0,
+          expiredDays: Math.abs(daysRemaining),
+          message: `⚠️ Your subscription expired ${Math.abs(daysRemaining)} days ago. Please contact admin to renew.`
+        };
+      } else if (daysRemaining <= 7) {
+        subscriptionStatus = {
+          status: 'expiring_soon',
+          daysRemaining,
+          message: `⚠️ Your subscription will expire in ${daysRemaining} day(s). Please contact admin to renew.`
+        };
+      } else if (daysRemaining <= 30) {
+        subscriptionStatus = {
+          status: 'expiring_within_month',
+          daysRemaining,
+          message: `ℹ️ Your subscription will expire in ${daysRemaining} days.`
+        };
+      } else {
+        subscriptionStatus = {
+          status: 'active',
+          daysRemaining,
+          message: `✅ Your subscription is active until ${endDate.toDateString()}.`
+        };
+      }
+    }
+
+    res.json({
+      ...owner.toObject(),
+      subscriptionStatus
+    });
   } catch (err) {
     next(err);
   }
@@ -224,7 +284,7 @@ exports.changePassword = async (req, res, next) => {
     }
 
     // Update password
-    owner.password = newPassword;
+    owner.password = await bcrypt.hash(newPassword, 10);
     await owner.save();
 
     res.json({ message: '✅ Password changed successfully' });
@@ -476,6 +536,28 @@ exports.getAllDevices = async (req, res, next) => {
 };
 
 /**
+ * @desc    Get Single Device
+ * @route   GET /api/owner/devices/:deviceId
+ * @access  Private (Owner)
+ */
+exports.getDeviceById = async (req, res, next) => {
+  try {
+    const device = await Device.findOne({
+      _id: req.params.deviceId,
+      owner_id: req.user._id
+    }).populate('staff_id', 'full_name employee_number');
+
+    if (!device) {
+      return res.status(404).json({ message: '❌ Device not found' });
+    }
+
+    res.json(device);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * @desc    Add New Device
  * @route   POST /api/owner/devices
  * @access  Private (Owner)
@@ -608,6 +690,97 @@ exports.updateDevice = async (req, res, next) => {
 };
 
 /**
+ * @desc    Assign Staff to Device
+ * @route   POST /api/owner/assign-staff-to-device
+ * @access  Private (Owner)
+ */
+exports.assignStaffToDevice = async (req, res, next) => {
+  try {
+    const { device_id, staff_id } = req.body;
+
+    if (!device_id) {
+      return res.status(400).json({ message: '⚠️ Device ID is required' });
+    }
+
+    // Find device and verify ownership
+    const device = await Device.findOne({ 
+      _id: device_id, 
+      owner_id: req.user._id 
+    });
+
+    if (!device) {
+      return res.status(404).json({ message: '❌ Device not found' });
+    }
+
+    // If staff_id is provided, verify it belongs to this owner
+    if (staff_id) {
+      const staff = await Staff.findOne({ 
+        _id: staff_id, 
+        owner_id: req.user._id 
+      });
+
+      if (!staff) {
+        return res.status(400).json({ 
+          message: '⚠️ Staff member not found or does not belong to your lab' 
+        });
+      }
+
+      // Assign staff to device
+      device.staff_id = staff_id;
+
+      // Send notification to staff
+      await Notification.create({
+        sender_id: req.user._id,
+        sender_model: 'Owner',
+        receiver_id: staff_id,
+        receiver_model: 'Staff',
+        type: 'system',
+        title: 'Device Assigned',
+        message: `You have been assigned to operate ${device.name} (${device.serial_number || 'N/A'})`
+      });
+    } else {
+      // Unassign staff (set to null)
+      device.staff_id = null;
+    }
+
+    await device.save();
+
+    // Create audit log
+    await AuditLog.create({
+      staff_id: null,
+      action: staff_id ? 'ASSIGN_STAFF_TO_DEVICE' : 'UNASSIGN_STAFF_FROM_DEVICE',
+      table_name: 'Device',
+      record_id: device._id,
+      owner_id: req.user._id
+    });
+
+    const populatedDevice = await Device.findById(device._id)
+      .populate('staff_id', 'full_name employee_number username');
+
+    res.json({ 
+      success: true,
+      message: staff_id 
+        ? '✅ Staff assigned to device successfully' 
+        : '✅ Staff unassigned from device',
+      device: {
+        _id: populatedDevice._id,
+        name: populatedDevice.name,
+        serial_number: populatedDevice.serial_number,
+        status: populatedDevice.status,
+        assigned_staff: populatedDevice.staff_id ? {
+          _id: populatedDevice.staff_id._id,
+          name: `${populatedDevice.staff_id.full_name.first} ${populatedDevice.staff_id.full_name.last}`,
+          employee_number: populatedDevice.staff_id.employee_number,
+          username: populatedDevice.staff_id.username
+        } : null
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * @desc    Delete Device
  * @route   DELETE /api/owner/devices/:deviceId
  * @access  Private (Owner)
@@ -657,6 +830,28 @@ exports.getAllTests = async (req, res, next) => {
   try {
     const tests = await Test.find({ owner_id: req.user._id }).populate('device_id', 'name serial_number');
     res.json({ count: tests.length, tests });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get Single Test
+ * @route   GET /api/owner/tests/:testId
+ * @access  Private (Owner)
+ */
+exports.getTestById = async (req, res, next) => {
+  try {
+    const test = await Test.findOne({
+      _id: req.params.testId,
+      owner_id: req.user._id
+    }).populate('device_id', 'name serial_number');
+
+    if (!test) {
+      return res.status(404).json({ message: '❌ Test not found' });
+    }
+
+    res.json(test);
   } catch (err) {
     next(err);
   }
@@ -878,6 +1073,42 @@ exports.getAllInventory = async (req, res, next) => {
       alerts: {
         lowStock: lowStock.length,
         expiringSoon: expiringSoon.length
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get Single Inventory Item
+ * @route   GET /api/owner/inventory/:itemId
+ * @access  Private (Owner)
+ */
+exports.getInventoryById = async (req, res, next) => {
+  try {
+    const { Inventory, StockInput, StockOutput } = require('../models/Inventory');
+    
+    const item = await Inventory.findOne({
+      _id: req.params.itemId,
+      owner_id: req.user._id
+    });
+
+    if (!item) {
+      return res.status(404).json({ message: '❌ Inventory item not found' });
+    }
+
+    // Get transaction history
+    const [inputs, outputs] = await Promise.all([
+      StockInput.find({ item_id: item._id }).sort({ input_date: -1 }).limit(10),
+      StockOutput.find({ item_id: item._id }).sort({ out_date: -1 }).limit(10)
+    ]);
+
+    res.json({ 
+      item,
+      history: {
+        recentInputs: inputs,
+        recentOutputs: outputs
       }
     });
   } catch (err) {
@@ -1161,6 +1392,89 @@ exports.getDashboard = async (req, res, next) => {
  * @route   GET /api/owner/reports
  * @access  Private (Owner)
  */
+/**
+ * @desc    Get All Orders
+ * @route   GET /api/owner/orders
+ * @access  Private (Owner)
+ */
+exports.getAllOrders = async (req, res, next) => {
+  try {
+    const { status, startDate, endDate, page = 1, limit = 50 } = req.query;
+
+    const query = { owner_id: req.user._id };
+    
+    // Filter by status if provided
+    if (status) {
+      query.status = status;
+    }
+
+    // Filter by date range if provided
+    if (startDate || endDate) {
+      query.order_date = {};
+      if (startDate) query.order_date.$gte = new Date(startDate);
+      if (endDate) query.order_date.$lte = new Date(endDate);
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [orders, total] = await Promise.all([
+      Order.find(query)
+        .populate('patient_id', 'full_name patient_id phone_number email')
+        .populate('doctor_id', 'name')
+        .sort({ order_date: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Order.countDocuments(query)
+    ]);
+
+    res.json({
+      total,
+      page: parseInt(page),
+      totalPages: Math.ceil(total / parseInt(limit)),
+      orders
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get Single Order
+ * @route   GET /api/owner/orders/:orderId
+ * @access  Private (Owner)
+ */
+exports.getOrderById = async (req, res, next) => {
+  try {
+    const order = await Order.findOne({
+      _id: req.params.orderId,
+      owner_id: req.user._id
+    })
+      .populate('patient_id', 'full_name patient_id phone_number email identity_number')
+      .populate('doctor_id', 'name phone_number email');
+
+    if (!order) {
+      return res.status(404).json({ message: '❌ Order not found' });
+    }
+
+    // Get order details (tests)
+    const orderDetails = await OrderDetails.find({ order_id: order._id })
+      .populate('test_id', 'test_name test_code price')
+      .populate('staff_id', 'full_name employee_number')
+      .populate('result_id');
+
+    // Get invoice if exists
+    const invoice = await Invoice.findOne({ order_id: order._id });
+
+    res.json({
+      order,
+      tests: orderDetails,
+      invoice
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.getReports = async (req, res, next) => {
   try {
     const { startDate, endDate } = req.query;
@@ -1330,6 +1644,55 @@ exports.sendNotificationToStaff = async (req, res, next) => {
 };
 
 // ==================== COMMUNICATION WITH ADMIN ====================
+
+/**
+ * @desc    Request Subscription Renewal
+ * @route   POST /api/owner/request-renewal
+ * @access  Private (Owner)
+ */
+exports.requestSubscriptionRenewal = async (req, res, next) => {
+  try {
+    const { renewal_duration, message } = req.body;
+
+    const owner = await LabOwner.findById(req.user._id);
+    
+    // Calculate days until expiration
+    const today = new Date();
+    const endDate = new Date(owner.subscription_end);
+    const daysRemaining = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+
+    // Get the admin who approved this owner
+    const Admin = require('../models/Admin');
+    const admin = await Admin.findById(owner.admin_id);
+
+    if (!admin) {
+      return res.status(404).json({ message: '❌ Admin not found' });
+    }
+
+    const renewalMessage = message || 
+      `I would like to renew my lab subscription for ${renewal_duration || 'another year'}. ` +
+      `Current subscription ${daysRemaining < 0 ? `expired ${Math.abs(daysRemaining)} days ago` : `expires in ${daysRemaining} days`}.`;
+
+    const notification = await Notification.create({
+      sender_id: req.user._id,
+      sender_model: 'Owner',
+      receiver_id: admin._id,
+      receiver_model: 'Admin',
+      type: 'subscription',
+      title: '🔄 Subscription Renewal Request',
+      message: `From Lab Owner (${owner.name.first} ${owner.name.last}): ${renewalMessage}`
+    });
+
+    res.status(201).json({ 
+      message: '✅ Subscription renewal request sent to admin successfully',
+      currentSubscriptionEnd: owner.subscription_end,
+      daysRemaining: daysRemaining > 0 ? daysRemaining : 0,
+      notification 
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 
 /**
  * @desc    Send Message to Admin

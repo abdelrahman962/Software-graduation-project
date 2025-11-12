@@ -1,8 +1,10 @@
 const Staff = require("../models/Staff");
 const Patient = require("../models/Patient");
+const Order = require("../models/Order");
 const Test = require("../models/Test");
 const OrderDetails = require("../models/OrderDetails");
 const Result = require("../models/Result");
+const Invoice = require("../models/Invoices");
 const { Inventory } = require("../models/Inventory");
 const Device = require("../models/Device");
 const Notification = require("../models/Notification");
@@ -36,7 +38,7 @@ exports.loginStaff = async (req, res) => {
     // ✅ Log the action for tracking by the lab owner
     await logAction(staff._id, `Staff ${staff.username} logged in at ${staff.last_login}`);
 
-    const token = jwt.sign({ id: staff._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign({ id: staff._id, role:'Staff', username:staff.username }, process.env.JWT_SECRET, { expiresIn: "7d" });
     res.json({ message: "Login successful", token, staff });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -44,36 +46,15 @@ exports.loginStaff = async (req, res) => {
 };
 
 
-// ✅ Register New Patient
-exports.registerPatient = async (req, res) => {
-  try {
-    const { name, email, phone_number } = req.body;
-
-    const username = email.split("@")[0];
-    const tempPassword = Math.random().toString(36).slice(-8);
-
-    const patient = await Patient.create({
-      ...req.body,
-      username,
-      password: tempPassword
-    });
-
-    await sendEmail(
-      email,
-      "Patient Account Created",
-      `Your lab account is created.\nUsername: ${username}\nPassword: ${tempPassword}`
-    );
-
-    res.status(201).json({ message: "Patient registered successfully", patient });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-};
-
-
 exports.uploadResult = async (req, res) => {
   try {
-    const { detail_id, result_value, remarks, staff_id } = req.body;
+    const staff_id = req.user.id; // Use authenticated staff ID
+    const { detail_id, result_value, remarks } = req.body;
+
+    // Validate required fields
+    if (!detail_id || !result_value) {
+      return res.status(400).json({ message: "detail_id and result_value are required" });
+    }
 
     // 1️⃣ Load order detail with related test + order
     const detail = await OrderDetails.findById(detail_id)
@@ -99,18 +80,25 @@ exports.uploadResult = async (req, res) => {
     // 3️⃣ Save result
     const result = await Result.create({
       detail_id,
+      staff_id, // Track who uploaded the result
       result_value,
       units: test.units,
       reference_range: test.reference_range,
       remarks
     });
 
-    // 4️⃣ If urgent → mark order as urgent + send notifications
+    // 3️⃣.5 Update OrderDetails status to 'completed' and link result
+    detail.status = 'completed';
+    detail.result_id = result._id;
+    await detail.save();
+
+    // 4️⃣ Send notifications
+    const notifications = [];
+
     if (isUrgent) {
+      // Mark order as urgent
       order.remarks = "urgent";
       await order.save();
-
-      const notifications = [];
 
       // 🔔 To the Doctor (if exists)
       if (order.doctor_id) {
@@ -121,12 +109,12 @@ exports.uploadResult = async (req, res) => {
           receiver_model: "Doctor",
           type: "test_result",
           title: "Urgent Test Result",
-          message: `Test ${test.test_name} result for patient ${order.patient_id?.name || ""} is outside normal range.`,
+          message: `Test ${test.test_name} result for patient ${order.patient_id?.full_name?.first || ""} ${order.patient_id?.full_name?.last || ""} is outside normal range.`,
           related_id: result._id
         });
       }
 
-      // 🔔 To the Patient
+      // 🔔 To the Patient (urgent)
       if (order.patient_id) {
         notifications.push({
           sender_id: staff_id,
@@ -134,16 +122,44 @@ exports.uploadResult = async (req, res) => {
           receiver_id: order.patient_id._id,
           receiver_model: "Patient",
           type: "test_result",
-          title: "Urgent Test Result",
+          title: "⚠️ Urgent Test Result Available",
           message: `Your test result for ${test.test_name} is outside the normal range. Please contact your doctor.`,
           related_id: result._id
         });
       }
-
-      // ✅ Save notifications
-      if (notifications.length > 0) {
-        await Notification.insertMany(notifications);
+    } else {
+      // 🔔 To the Patient (normal result)
+      if (order.patient_id) {
+        notifications.push({
+          sender_id: staff_id,
+          sender_model: "Staff",
+          receiver_id: order.patient_id._id,
+          receiver_model: "Patient",
+          type: "test_result",
+          title: "✅ Test Result Available",
+          message: `Your test result for ${test.test_name} is now available. You can view it in your dashboard.`,
+          related_id: result._id
+        });
       }
+
+      // 🔔 To the Doctor (normal result)
+      if (order.doctor_id) {
+        notifications.push({
+          sender_id: staff_id,
+          sender_model: "Staff",
+          receiver_id: order.doctor_id._id,
+          receiver_model: "Doctor",
+          type: "test_result",
+          title: "✅ Test Result Available",
+          message: `Test ${test.test_name} result for patient ${order.patient_id?.full_name?.first || ""} ${order.patient_id?.full_name?.last || ""} is now available.`,
+          related_id: result._id
+        });
+      }
+    }
+
+    // ✅ Save notifications
+    if (notifications.length > 0) {
+      await Notification.insertMany(notifications);
     }
 
     res.status(201).json({
@@ -162,11 +178,16 @@ exports.uploadResult = async (req, res) => {
 
 exports.reportIssue = async (req, res) => {
   try {
-    const { staff_id, issue_type, related_id, message } = req.body;
+    const staff_id = req.user.id; // Use authenticated staff
+    const { issue_type, related_id, message } = req.body;
 
     if (!["device", "reagent"].includes(issue_type)) {
       return res.status(400).json({ message: "Invalid issue type. Must be 'device' or 'reagent'." });
     }
+
+    // Get staff to find owner_id
+    const staff = await Staff.findById(staff_id);
+    if (!staff) return res.status(404).json({ message: "Staff not found" });
 
     // Fetch more info for context
     let title = "Issue Reported";
@@ -186,7 +207,8 @@ exports.reportIssue = async (req, res) => {
     await Notification.create({
       sender_id: staff_id,
       sender_model: "Staff",
-      receiver_model: "LabOwner",
+      receiver_id: staff.owner_id,
+      receiver_model: "Owner",
       type: "maintenance",
       title,
       message: `${description}\nDetails: ${message}`,
@@ -227,27 +249,134 @@ exports.getAssignedTests = async (req, res) => {
 };
 
 
-// ✅ Update Sample Status
+// ✅ Collect Sample from Patient
+exports.collectSample = async (req, res) => {
+  try {
+    const { detail_id, staff_id, notes } = req.body;
+
+    if (!detail_id || !staff_id) {
+      return res.status(400).json({ 
+        message: "⚠️ Detail ID and Staff ID are required" 
+      });
+    }
+
+    const detail = await OrderDetails.findById(detail_id)
+      .populate('test_id', 'test_name sample_type tube_type')
+      .populate('order_id');
+
+    if (!detail) {
+      return res.status(404).json({ message: "❌ Order detail not found" });
+    }
+
+    if (detail.sample_collected) {
+      return res.status(400).json({ 
+        message: "⚠️ Sample already collected for this test" 
+      });
+    }
+
+    // Update sample collection
+    detail.sample_collected = true;
+    detail.sample_collected_date = new Date();
+    detail.status = 'collected';
+    detail.staff_id = staff_id; // Assign staff who collected sample
+
+    await detail.save();
+
+    // Log action
+    await logAction(
+      staff_id, 
+      `Collected ${detail.test_id.sample_type} sample for test ${detail.test_id.test_name}`,
+      'OrderDetails',
+      detail_id
+    );
+
+    // Notify patient
+    if (detail.order_id && detail.order_id.patient_id) {
+      await Notification.create({
+        sender_id: staff_id,
+        sender_model: 'Staff',
+        receiver_id: detail.order_id.patient_id,
+        receiver_model: 'Patient',
+        type: 'system',
+        title: 'Sample Collected',
+        message: `Your ${detail.test_id.test_name} sample has been collected and is being processed.`
+      });
+    }
+
+    res.json({ 
+      success: true,
+      message: "✅ Sample collected successfully",
+      detail: {
+        _id: detail._id,
+        test_name: detail.test_id.test_name,
+        sample_type: detail.test_id.sample_type,
+        tube_type: detail.test_id.tube_type,
+        sample_collected: detail.sample_collected,
+        sample_collected_date: detail.sample_collected_date,
+        status: detail.status,
+        notes
+      }
+    });
+
+  } catch (err) {
+    console.error("Error collecting sample:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ✅ Update Sample/Test Status
 exports.updateSampleStatus = async (req, res) => {
   try {
     const { detail_id, status } = req.body;
 
-    const validStatuses = ["Pending", "Collected", "In Progress", "Completed"];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: "Invalid status value" });
+    const validStatuses = ["pending", "urgent", "collected", "in_progress", "completed"];
+    if (!validStatuses.includes(status.toLowerCase())) {
+      return res.status(400).json({ 
+        message: `⚠️ Invalid status. Must be one of: ${validStatuses.join(', ')}` 
+      });
     }
 
-    const detail = await OrderDetails.findById(detail_id);
-    if (!detail) return res.status(404).json({ message: "Order detail not found" });
+    const detail = await OrderDetails.findById(detail_id)
+      .populate('test_id', 'test_name');
 
-    detail.status = status;
-    if (status === "Collected") detail.sample_collected = true;
+    if (!detail) {
+      return res.status(404).json({ message: "❌ Order detail not found" });
+    }
+
+    const normalizedStatus = status.toLowerCase();
+    const oldStatus = detail.status;
+    
+    detail.status = normalizedStatus;
+    
+    // Auto-mark sample as collected if status is collected or beyond
+    if (['collected', 'in_progress', 'completed'].includes(normalizedStatus) && !detail.sample_collected) {
+      detail.sample_collected = true;
+      detail.sample_collected_date = new Date();
+    }
 
     await detail.save();
-    await logAction(detail.staff_id, `Updated sample status to ${status} for OrderDetail ${detail_id}`);
+    
+    await logAction(
+      detail.staff_id, 
+      `Updated test status from '${oldStatus}' to '${normalizedStatus}' for ${detail.test_id.test_name}`,
+      'OrderDetails',
+      detail_id
+    );
 
-    res.json({ message: "Sample status updated successfully", detail });
+    res.json({ 
+      success: true,
+      message: `✅ Status updated to '${normalizedStatus}'`,
+      detail: {
+        _id: detail._id,
+        test_name: detail.test_id.test_name,
+        status: detail.status,
+        sample_collected: detail.sample_collected,
+        sample_collected_date: detail.sample_collected_date
+      }
+    });
+
   } catch (err) {
+    console.error("Error updating sample status:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -307,6 +436,649 @@ exports.getStaffLoginActivity = async (req, res) => {
       staff: staffList
     });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ✅ Staff Dashboard (with devices & inventory)
+exports.getStaffDashboard = async (req, res) => {
+  try {
+    const staff_id = req.user.id; // from authMiddleware
+
+    // 1️⃣ Assigned tests (all statuses) - Prioritize urgent tests
+    const assignedTests = await OrderDetails.find({ staff_id })
+      .populate('test_id', 'test_name test_code sample_type')
+      .populate({
+        path: 'order_id',
+        select: 'barcode order_date status remarks',
+        populate: { 
+          path: 'patient_id', 
+          select: 'full_name patient_id email phone_number' 
+        }
+      })
+      .sort({ 
+        status: 1,        // "urgent" comes before "pending" alphabetically
+        created_at: -1    // Then by newest first
+      })
+      .limit(20);
+
+    // 2️⃣ Notifications
+    const notifications = await Notification.find({ receiver_id: staff_id })
+      .sort({ created_at: -1 })
+      .limit(10);
+
+    // 3️⃣ Recently uploaded results
+    const recentResults = await Result.find({ staff_id })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate("detail_id");
+
+    // 4️⃣ Sample summary (case-insensitive status matching)
+    const sampleSummary = {
+      totalAssigned: assignedTests.length,
+      pending: assignedTests.filter(t => t.status?.toLowerCase() === "pending").length,
+      inProgress: assignedTests.filter(t => t.status?.toLowerCase() === "in progress").length,
+      completed: assignedTests.filter(t => t.status?.toLowerCase() === "completed").length,
+    };
+
+    // 5️⃣ Assigned devices (check staff_id field, not assigned_to)
+    const devices = await Device.find({ staff_id });
+
+    // 6️⃣ Inventory items (if applicable)
+    const inventory = await Inventory.find({ owner_id: req.user.ownerId });
+
+    // 7️⃣ Inventory summary
+    const inventorySummary = {
+      totalItems: inventory.length,
+      available: inventory.filter(i => i.quantity > 0).length,
+      lowStock: inventory.filter(i => i.quantity <= i.min_quantity).length,
+    };
+
+    res.json({
+      message: "Staff dashboard retrieved successfully",
+      data: {
+        sampleSummary,
+        assignedTests: assignedTests.map(test => ({
+          detail_id: test._id,
+          test_name: test.test_id?.test_name,
+          test_code: test.test_id?.test_code,
+          patient: test.order_id?.patient_id ? {
+            name: `${test.order_id.patient_id.full_name.first} ${test.order_id.patient_id.full_name.last}`,
+            patient_id: test.order_id.patient_id.patient_id
+          } : null,
+          order_barcode: test.order_id?.barcode,
+          status: test.status,
+          sample_collected: test.sample_collected
+        })),
+        notifications,
+        recentResults,
+        devices,
+        inventory,
+        inventorySummary
+      }
+    });
+
+  } catch (err) {
+    console.error("Error fetching staff dashboard:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ===============================
+// 📋 Pending Order Management
+// ===============================
+
+/**
+ * @desc    Get all pending orders (submitted but patient not registered)
+ * @route   GET /api/staff/pending-orders
+ * @access  Private (Staff)
+ */
+exports.getPendingOrders = async (req, res) => {
+  try {
+    const staff_id = req.user.id;
+
+    // Get staff to find their lab (owner_id)
+    const staff = await Staff.findById(staff_id);
+    if (!staff) {
+      return res.status(404).json({ message: "Staff not found" });
+    }
+
+    // Get all pending orders for this lab where patient not yet registered
+    // Sort by urgency first, then by date (urgent tests appear at the top)
+    const pendingOrders = await Order.find({
+      owner_id: staff.owner_id,
+      status: 'pending',
+      is_patient_registered: false
+    })
+    .sort({ 
+      remarks: -1,      // "urgent" > null/empty (descending = urgent first)
+      order_date: 1     // Then by date (oldest first)
+    });
+
+    // Get order details for each order
+    const ordersWithDetails = await Promise.all(
+      pendingOrders.map(async (order) => {
+        const details = await OrderDetails.find({ order_id: order._id })
+          .populate('test_id', 'test_name test_code price');
+        
+        const totalCost = details.reduce((sum, detail) => {
+          return sum + (detail.test_id.price || 0);
+        }, 0);
+
+        return {
+          order_id: order._id,
+          barcode: order.barcode,
+          patient_info: order.temp_patient_info,
+          order_date: order.order_date,
+          remarks: order.remarks,
+          is_urgent: order.remarks === 'urgent',
+          tests: details.map(d => ({
+            test_name: d.test_id.test_name,
+            test_code: d.test_id.test_code,
+            price: d.test_id.price,
+            status: d.status,
+            is_urgent: d.status === 'urgent'
+          })),
+          total_cost: totalCost,
+          tests_count: details.length
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      count: ordersWithDetails.length,
+      pending_orders: ordersWithDetails
+    });
+
+  } catch (err) {
+    console.error("Error fetching pending orders:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Register patient and link to existing order
+ * @route   POST /api/staff/register-patient-from-order
+ * @access  Private (Staff)
+ */
+exports.registerPatientFromOrder = async (req, res) => {
+  try {
+    const { order_id } = req.body;
+    const staff_id = req.user.id;
+
+    // Get the order
+    const order = await Order.findById(order_id);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    if (order.is_patient_registered) {
+      return res.status(400).json({ 
+        message: "Patient already registered for this order" 
+      });
+    }
+
+    // Check if patient already exists (by identity_number or email)
+    let patient = await Patient.findOne({
+      $or: [
+        { identity_number: order.temp_patient_info.identity_number },
+        { email: order.temp_patient_info.email }
+      ]
+    });
+
+    let isNewPatient = false;
+    let tempPassword = null;
+
+    // If patient doesn't exist, create new patient
+    if (!patient) {
+      isNewPatient = true;
+      const username = order.temp_patient_info.email.split("@")[0];
+      tempPassword = Math.random().toString(36).slice(-8);
+
+      patient = await Patient.create({
+        full_name: order.temp_patient_info.full_name,
+        identity_number: order.temp_patient_info.identity_number,
+        birthday: order.temp_patient_info.birthday,
+        gender: order.temp_patient_info.gender,
+        phone_number: order.temp_patient_info.phone_number,
+        email: order.temp_patient_info.email,
+        address: order.temp_patient_info.address,
+        patient_id: `PAT-${Date.now()}`,
+        username,
+        password: tempPassword,
+        created_by_staff: staff_id
+      });
+
+      // Send credentials email
+      await sendEmail(
+        patient.email,
+        "Your Lab Account Has Been Created",
+        `Dear ${order.temp_patient_info.full_name.first},\n\n` +
+        `Your account has been created!\n\n` +
+        `Username: ${username}\n` +
+        `Temporary Password: ${tempPassword}\n\n` +
+        `Your order (${order.barcode}) is being processed.\n` +
+        `Please log in to view your results and manage your profile.\n\n` +
+        `Best regards,\nLab Team`
+      );
+    }
+
+    // Link patient to order
+    order.patient_id = patient._id;
+    order.is_patient_registered = true;
+    order.status = 'processing';
+    order.requested_by = staff_id;
+    await order.save();
+
+    // Get order details to create invoice and assign staff
+    const orderDetails = await OrderDetails.find({ order_id: order._id })
+      .populate({
+        path: 'test_id',
+        populate: {
+          path: 'device_id',
+          select: 'staff_id name'
+        }
+      });
+
+    // 🎯 AUTO-ASSIGN STAFF BASED ON DEVICE
+    for (const detail of orderDetails) {
+      const test = detail.test_id;
+      
+      // If test uses a device and device has assigned staff
+      if (test && test.method === 'device' && test.device_id && test.device_id.staff_id) {
+        detail.staff_id = test.device_id.staff_id;
+        await detail.save();
+
+        // Send notification to assigned staff
+        await Notification.create({
+          sender_id: staff_id,
+          sender_model: 'Staff',
+          receiver_id: test.device_id.staff_id,
+          receiver_model: 'Staff',
+          type: 'system',
+          title: 'New Test Assignment',
+          message: `You have been assigned to perform ${test.test_name} for patient ${patient.full_name.first} ${patient.full_name.last} (Order: ${order.barcode})`
+        });
+      }
+      // If manual test, leave staff_id null for manual assignment by owner
+    }
+
+    // Create invoice
+    const subtotal = orderDetails.reduce((sum, detail) => {
+      return sum + (detail.test_id.price || 0);
+    }, 0);
+
+    await Invoice.create({
+      order_id: order._id,
+      invoice_date: new Date(),
+      subtotal,
+      discount: 0,
+      total_amount: subtotal,
+      payment_status: 'pending',
+      owner_id: order.owner_id
+    });
+
+    // Send notification to patient
+    await Notification.create({
+      sender_id: staff_id,
+      sender_model: 'Staff',
+      receiver_id: patient._id,
+      receiver_model: 'Patient',
+      type: 'test_result',
+      title: 'Order Confirmed',
+      message: `Your test order (${order.barcode}) has been confirmed and is now being processed.`
+    });
+
+    // Log action
+    await logAction(
+      staff_id,
+      isNewPatient 
+        ? `Registered new patient ${patient.patient_id} from order ${order.barcode}`
+        : `Linked existing patient ${patient.patient_id} to order ${order.barcode}`,
+      'Order',
+      order._id,
+      order.owner_id
+    );
+
+    res.json({
+      success: true,
+      message: isNewPatient 
+        ? "✅ New patient registered and order linked!"
+        : "✅ Existing patient found and order linked!",
+      patient: {
+        _id: patient._id,
+        patient_id: patient.patient_id,
+        name: `${patient.full_name.first} ${patient.full_name.last}`,
+        email: patient.email,
+        is_new: isNewPatient,
+        credentials: isNewPatient ? {
+          username: patient.username,
+          temp_password: tempPassword
+        } : null
+      },
+      order: {
+        _id: order._id,
+        barcode: order.barcode,
+        status: order.status,
+        total_amount: subtotal
+      }
+    });
+
+  } catch (err) {
+    console.error("Error registering patient from order:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Get all unassigned tests (tests without staff assignment)
+ * @route   GET /api/staff/unassigned-tests
+ * @access  Owner/Manager
+ */
+exports.getUnassignedTests = async (req, res) => {
+  try {
+    const owner_id = req.user.ownerId; // Assuming owner is logged in
+
+    // Find all order details where staff_id is null and order belongs to this lab
+    // Sort by urgency first (urgent tests at the top)
+    const unassignedTests = await OrderDetails.find({ 
+      staff_id: null 
+    })
+    .populate({
+      path: 'order_id',
+      match: { owner_id: owner_id },
+      populate: { path: 'patient_id', select: 'full_name patient_id' }
+    })
+    .populate('test_id', 'test_name test_code method sample_type')
+    .sort({ 
+      status: 1,        // "urgent" before "pending" alphabetically
+      created_at: -1    // Then by newest first
+    })
+    .lean();
+
+    // Filter out tests where order doesn't belong to this lab
+    const filteredTests = unassignedTests.filter(test => test.order_id !== null);
+
+    res.json({
+      success: true,
+      count: filteredTests.length,
+      unassigned_tests: filteredTests.map(test => ({
+        detail_id: test._id,
+        test_name: test.test_id?.test_name,
+        test_code: test.test_id?.test_code,
+        method: test.test_id?.method,
+        sample_type: test.test_id?.sample_type,
+        status: test.status,
+        patient_name: test.order_id?.patient_id 
+          ? `${test.order_id.patient_id.full_name.first} ${test.order_id.patient_id.full_name.last}`
+          : 'Unknown',
+        patient_id: test.order_id?.patient_id?.patient_id,
+        order_barcode: test.order_id?.barcode,
+        order_status: test.order_id?.status
+      }))
+    });
+
+  } catch (err) {
+    console.error("Error fetching unassigned tests:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Manually assign staff to a test (for manual tests or reassignment)
+ * @route   POST /api/staff/assign-to-test
+ * @access  Owner/Manager
+ */
+exports.assignStaffToTest = async (req, res) => {
+  try {
+    const { detail_id, staff_id } = req.body;
+
+    if (!detail_id || !staff_id) {
+      return res.status(400).json({ 
+        message: "detail_id and staff_id are required" 
+      });
+    }
+
+    // Get order detail with test and order info
+    const detail = await OrderDetails.findById(detail_id)
+      .populate('test_id', 'test_name')
+      .populate({
+        path: 'order_id',
+        populate: { path: 'patient_id', select: 'full_name' }
+      });
+
+    if (!detail) {
+      return res.status(404).json({ message: "Order detail not found" });
+    }
+
+    // Verify staff exists and belongs to same lab
+    const staff = await Staff.findById(staff_id);
+    if (!staff) {
+      return res.status(404).json({ message: "Staff not found" });
+    }
+
+    // Verify staff belongs to same lab as the order
+    if (staff.owner_id.toString() !== detail.order_id.owner_id.toString()) {
+      return res.status(403).json({ message: "Cannot assign staff from different lab" });
+    }
+
+    // Update assignment
+    const previousStaffId = detail.staff_id;
+    detail.staff_id = staff_id;
+    await detail.save();
+
+    // Send notification to newly assigned staff
+    await Notification.create({
+      sender_id: req.user.id,
+      sender_model: 'Owner',
+      receiver_id: staff_id,
+      receiver_model: 'Staff',
+      type: 'system',
+      title: previousStaffId ? 'Test Reassigned to You' : 'New Test Assignment',
+      message: `You have been assigned to perform ${detail.test_id.test_name} for patient ${detail.order_id.patient_id?.full_name.first || 'Unknown'} (Order: ${detail.order_id.barcode})`
+    });
+
+    // If reassignment, notify previous staff
+    if (previousStaffId && previousStaffId.toString() !== staff_id.toString()) {
+      await Notification.create({
+        sender_id: req.user.id,
+        sender_model: 'Owner',
+        receiver_id: previousStaffId,
+        receiver_model: 'Staff',
+        type: 'system',
+        title: 'Test Reassigned',
+        message: `Test ${detail.test_id.test_name} (Order: ${detail.order_id.barcode}) has been reassigned to another staff member`
+      });
+    }
+
+    // Log action
+    await logAction(
+      req.user.id,
+      previousStaffId 
+        ? `Reassigned test ${detail.test_id.test_name} from staff ${previousStaffId} to ${staff_id}`
+        : `Assigned test ${detail.test_id.test_name} to staff ${staff_id}`,
+      'OrderDetails',
+      detail._id,
+      detail.order_id.owner_id
+    );
+
+    res.json({
+      success: true,
+      message: previousStaffId ? "✅ Test reassigned successfully" : "✅ Staff assigned successfully",
+      detail: {
+        detail_id: detail._id,
+        test_name: detail.test_id.test_name,
+        assigned_to: {
+          staff_id: staff._id,
+          staff_name: `${staff.full_name.first} ${staff.full_name.last}`
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error("Error assigning staff to test:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Get order details (test items) for a specific order
+ * @route   GET /api/staff/order-details/:order_id
+ * @access  Staff (Auth Required)
+ */
+exports.getOrderDetails = async (req, res) => {
+  try {
+    const { order_id } = req.params;
+
+    const orderDetails = await OrderDetails.find({ order_id })
+      .populate('test_id', 'test_name test_code sample_type price device_id')
+      .populate('order_id', 'barcode status')
+      .populate('staff_id', 'full_name employee_number')
+      .populate({
+        path: 'test_id',
+        populate: {
+          path: 'device_id',
+          select: 'name serial_number'
+        }
+      })
+      .lean();
+
+    if (!orderDetails || orderDetails.length === 0) {
+      return res.status(404).json({ message: "No order details found for this order" });
+    }
+
+    res.json({
+      success: true,
+      count: orderDetails.length,
+      order_details: orderDetails.map(detail => ({
+        detail_id: detail._id,
+        test_name: detail.test_id?.test_name,
+        test_code: detail.test_id?.test_code,
+        sample_type: detail.test_id?.sample_type,
+        price: detail.test_id?.price,
+        device: detail.test_id?.device_id ? {
+          name: detail.test_id.device_id.name,
+          serial_number: detail.test_id.device_id.serial_number
+        } : null,
+        assigned_staff: detail.staff_id ? {
+          _id: detail.staff_id._id,
+          name: `${detail.staff_id.full_name.first} ${detail.staff_id.full_name.last}`,
+          employee_number: detail.staff_id.employee_number
+        } : null,
+        status: detail.status,
+        sample_collected: detail.sample_collected,
+        sample_collected_date: detail.sample_collected_date,
+        order_barcode: detail.order_id?.barcode,
+        order_status: detail.order_id?.status
+      }))
+    });
+
+  } catch (err) {
+    console.error("Error fetching order details:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Mark test as completed (for tests that have results uploaded)
+ * @route   PUT /api/staff/mark-completed/:detail_id
+ * @access  Staff/Owner
+ */
+exports.markTestCompleted = async (req, res) => {
+  try {
+    const { detail_id } = req.params;
+
+    const detail = await OrderDetails.findById(detail_id);
+    if (!detail) {
+      return res.status(404).json({ message: "Order detail not found" });
+    }
+
+    // Check if result exists
+    const result = await Result.findOne({ detail_id });
+    if (!result) {
+      return res.status(400).json({ message: "Cannot mark as completed - no result uploaded yet" });
+    }
+
+    // Update status
+    detail.status = 'completed';
+    await detail.save();
+
+    res.json({
+      success: true,
+      message: "Test marked as completed",
+      detail_id: detail._id,
+      status: detail.status
+    });
+
+  } catch (err) {
+    console.error("Error marking test as completed:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Get all tests assigned to the logged-in staff member
+ * @route   GET /api/staff/my-assigned-tests
+ * @access  Staff
+ */
+exports.getMyAssignedTests = async (req, res) => {
+  try {
+    const staff_id = req.user.id;
+
+    // Find all order details assigned to this staff member
+    // Sort by urgency first (urgent tests at the top)
+    const assignedTests = await OrderDetails.find({ staff_id })
+      .populate({
+        path: 'test_id',
+        select: 'test_name test_code sample_type device_id',
+        populate: {
+          path: 'device_id',
+          select: 'name serial_number'
+        }
+      })
+      .populate({
+        path: 'order_id',
+        select: 'barcode order_date status patient_id remarks',
+        populate: {
+          path: 'patient_id',
+          select: 'full_name patient_id'
+        }
+      })
+      .sort({ 
+        status: 1,        // "urgent" before "pending" alphabetically
+        created_at: -1    // Then by newest first
+      })
+      .lean();
+
+    res.json({
+      success: true,
+      count: assignedTests.length,
+      assigned_tests: assignedTests.map(detail => ({
+        detail_id: detail._id,
+        test_name: detail.test_id?.test_name,
+        test_code: detail.test_id?.test_code,
+        sample_type: detail.test_id?.sample_type,
+        device: detail.test_id?.device_id ? {
+          name: detail.test_id.device_id.name,
+          serial_number: detail.test_id.device_id.serial_number
+        } : null,
+        patient: detail.order_id?.patient_id ? {
+          name: `${detail.order_id.patient_id.full_name.first} ${detail.order_id.patient_id.full_name.last}`,
+          patient_id: detail.order_id.patient_id.patient_id
+        } : null,
+        order_barcode: detail.order_id?.barcode,
+        order_date: detail.order_id?.order_date,
+        status: detail.status,
+        is_urgent: detail.status === 'urgent' || detail.order_id?.remarks === 'urgent',
+        sample_collected: detail.sample_collected,
+        sample_collection_date: detail.sample_collection_date,
+        result_uploaded: detail.result_id ? true : false
+      }))
+    });
+
+  } catch (err) {
+    console.error("Error fetching assigned tests:", err);
     res.status(500).json({ error: err.message });
   }
 };

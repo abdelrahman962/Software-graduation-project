@@ -7,7 +7,7 @@ const NotificationSchema = new mongoose.Schema({
   receiver_id: { type: mongoose.Schema.Types.ObjectId, refPath: 'receiver_model' },
   receiver_model: { type: String, enum: ['Owner', 'Patient', 'Doctor','Admin','Staff'], required: true },
 
-  type: { type: String, enum: ['subscription', 'system', 'maintenance', 'test_result'], default: 'subscription' },
+  type: { type: String, enum: ['subscription', 'system', 'maintenance', 'test_result', 'request', 'payment'], default: 'subscription' },
   title: String,
   message: String,
   related_id: { type: mongoose.Schema.Types.ObjectId }, 

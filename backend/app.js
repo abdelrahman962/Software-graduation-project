@@ -2,6 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 const cronJobs = require('./cronJobs');
+const mongoSanitize = require('express-mongo-sanitize');
 
 dotenv.config();
 
@@ -31,12 +32,22 @@ app.use(cors({
 
 app.use(express.json());
 
+// NoSQL Injection Protection - sanitize all user input
+app.use(mongoSanitize({
+  replaceWith: '_',
+  onSanitize: ({ req, key }) => {
+    console.warn(`⚠️ Sanitized potentially malicious input: ${key}`);
+  }
+}));
+
 // Routes
+app.use('/api/public', require('./routes/publicRoutes')); // Public endpoints (no auth)
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/owner', require('./routes/ownerRoutes'));
 app.use('/api/patient', require('./routes/patientRoutes'));
 app.use('/api/staff', require('./routes/staffRoutes'));
-
+app.use('/api/doctor', require('./routes/doctorRoutes'));
+app.use('/api/invoice', require('./routes/invoiceRoutes')); // Invoice & payment endpoints
 // Error Middleware
 app.use((err, req, res, next) => {
   res.status(500).json({ message: err.message });

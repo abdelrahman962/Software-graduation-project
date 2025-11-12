@@ -4,6 +4,8 @@ const patientController = require('../controllers/patientController');
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
 const { loginLimiter } = require('../middleware/rateLimitMiddleware');
+const { validateRequest } = require('../middleware/validationMiddleware');
+const patientValidator = require('../validators/patientValidator');
 
 // ==================== AUTHENTICATION ROUTES ====================
 
@@ -12,7 +14,12 @@ const { loginLimiter } = require('../middleware/rateLimitMiddleware');
  * @desc    Patient login
  * @access  Public
  */
-router.post('/login', loginLimiter, patientController.login);
+router.post('/login', 
+  loginLimiter, 
+  ...patientValidator.validateLogin, 
+  validateRequest, 
+  patientController.login
+);
 
 /**
  * @route   GET /api/patient/profile
@@ -33,7 +40,13 @@ router.put('/profile', authMiddleware, roleMiddleware(['patient']), patientContr
  * @desc    Change password
  * @access  Private (Patient)
  */
-router.put('/change-password', authMiddleware, roleMiddleware(['patient']), patientController.changePassword);
+router.put('/change-password', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  ...patientValidator.validateChangePassword, 
+  validateRequest, 
+  patientController.changePassword
+);
 
 // ==================== TEST ORDER ROUTES ====================
 
@@ -42,21 +55,39 @@ router.put('/change-password', authMiddleware, roleMiddleware(['patient']), pati
  * @desc    Get all patient orders
  * @access  Private (Patient)
  */
-router.get('/orders', authMiddleware, roleMiddleware(['patient']), patientController.getMyOrders);
+router.get('/orders', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  ...patientValidator.validateGetOrders, 
+  validateRequest, 
+  patientController.getMyOrders
+);
 
 /**
  * @route   GET /api/patient/orders/:orderId
  * @desc    Get single order details
  * @access  Private (Patient)
  */
-router.get('/orders/:orderId', authMiddleware, roleMiddleware(['patient']), patientController.getOrderById);
+router.get('/orders/:orderId', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  ...patientValidator.validateOrderId, 
+  validateRequest, 
+  patientController.getOrderById
+);
 
 /**
  * @route   POST /api/patient/request-tests
  * @desc    Request new tests (self-request)
  * @access  Private (Patient)
  */
-router.post('/request-tests', authMiddleware, roleMiddleware(['patient']), patientController.requestTests);
+router.post('/request-tests', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  ...patientValidator.validateRequestTests, 
+  validateRequest, 
+  patientController.requestTests
+);
 
 // ==================== TEST RESULTS ROUTES ====================
 
@@ -104,7 +135,13 @@ router.get('/notifications', authMiddleware, roleMiddleware(['patient']), patien
  * @desc    Mark notification as read
  * @access  Private (Patient)
  */
-router.put('/notifications/:notificationId/read', authMiddleware, roleMiddleware(['patient']), patientController.markNotificationAsRead);
+router.put('/notifications/:notificationId/read', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  ...patientValidator.validateNotificationId, 
+  validateRequest, 
+  patientController.markNotificationAsRead
+);
 
 // ==================== INVOICE ROUTES ====================
 
@@ -113,30 +150,63 @@ router.put('/notifications/:notificationId/read', authMiddleware, roleMiddleware
  * @desc    Get all invoices
  * @access  Private (Patient)
  */
-router.get('/invoices', authMiddleware, roleMiddleware(['patient']), patientController.getMyInvoices);
+router.get('/invoices', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  patientController.getMyInvoices
+);
 
 /**
  * @route   GET /api/patient/invoices/:invoiceId
  * @desc    Get single invoice
  * @access  Private (Patient)
  */
-router.get('/invoices/:invoiceId', authMiddleware, roleMiddleware(['patient']), patientController.getInvoiceById);
+router.get('/invoices/:invoiceId', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  ...patientValidator.validateInvoiceId, 
+  validateRequest, 
+  patientController.getInvoiceById
+);
 
-// ==================== LABS & TESTS ROUTES ====================
+// ==================== LABS & TESTS & DOCTORS ROUTES ====================
+
+/**
+ * @route   GET /api/patient/doctors
+ * @desc    Get available doctors (for linking to test orders)
+ * @access  Private (Patient)
+ */
+router.get('/doctors', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  ...patientValidator.validateSearchDoctors, 
+  validateRequest, 
+  patientController.getAvailableDoctors
+);
 
 /**
  * @route   GET /api/patient/labs
  * @desc    Get available labs
  * @access  Private (Patient)
  */
-router.get('/labs', authMiddleware, roleMiddleware(['patient']), patientController.getAvailableLabs);
+router.get('/labs', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  patientController.getAvailableLabs
+);
 
 /**
  * @route   GET /api/patient/labs/:labId/tests
  * @desc    Get available tests for a lab
  * @access  Private (Patient)
  */
-router.get('/labs/:labId/tests', authMiddleware, roleMiddleware(['patient']), patientController.getLabTests);
+router.get('/labs/:labId/tests', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  ...patientValidator.validateLabId, 
+  validateRequest, 
+  patientController.getLabTests
+);
 
 // ==================== DASHBOARD ROUTE ====================
 
@@ -148,3 +218,4 @@ router.get('/labs/:labId/tests', authMiddleware, roleMiddleware(['patient']), pa
 router.get('/dashboard', authMiddleware, roleMiddleware(['patient']), patientController.getDashboard);
 
 module.exports = router;
+

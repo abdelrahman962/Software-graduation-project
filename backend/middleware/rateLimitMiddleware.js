@@ -22,7 +22,31 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Rate limiter for result uploads (stricter)
+const resultUploadLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 10, // Limit to 10 result uploads per minute
+  message: {
+    message: '🚫 Too many result uploads. Please wait a moment before uploading more results.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// Rate limiter for sample collection
+const sampleCollectionLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 20, // Allow 20 sample collections per minute (higher than results)
+  message: {
+    message: '🚫 Too many sample collections. Please slow down.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
 module.exports = {
   loginLimiter,
-  apiLimiter
+  apiLimiter,
+  resultUploadLimiter,
+  sampleCollectionLimiter
 };

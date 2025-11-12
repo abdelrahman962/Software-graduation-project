@@ -9,8 +9,28 @@ const adminSchema = new mongoose.Schema({
   phone_number: String,
   admin_id: { type: String, unique: true },
   email: { type: String, unique: true },
-  username: { type: String, unique: true },
+  username: { 
+    type: String, 
+    unique: true,
+    lowercase: true,
+    trim: true,
+    validate: {
+      validator: function(v) {
+        return /^[a-z0-9._-]+$/.test(v);
+      },
+      message: 'Username can only contain lowercase letters, numbers, dots, underscores, and hyphens (no spaces)'
+    }
+  },
   password: String
+});
+
+// Normalize username before saving
+adminSchema.pre('save', function(next) {
+  if (this.isModified('username')) {
+    // Remove spaces and convert to lowercase
+    this.username = this.username.replace(/\s+/g, '.').toLowerCase();
+  }
+  next();
 });
 
 // Hash password before saving

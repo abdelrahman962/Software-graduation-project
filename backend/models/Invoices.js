@@ -4,11 +4,13 @@ const invoiceSchema = new mongoose.Schema({
   order_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Orders' },
   invoice_date: { type: Date, default: Date.now },
   subtotal: Number,
-  discount: Number,
+  discount: { type: Number, default: 0 },
   total_amount: Number,
+  amount_paid: { type: Number, default: 0 }, // Track how much has been paid
   payment_status: { type: String, enum: ['pending','paid','partial'], default: 'pending' },
   payment_method: { type: String, enum: ['cash','card','bank_transfer'] },
-  paid_by: String,
+  payment_date: { type: Date }, // When payment was received
+  paid_by: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' }, // Staff who recorded payment
   remarks: String,
   owner_id: { type: mongoose.Schema.Types.ObjectId, ref: 'LabOwner' }
 });

@@ -257,11 +257,18 @@ exports.getOrderById = async (req, res, next) => {
  * @access  Private (Patient)
  */
 exports.requestTests = async (req, res, next) => {
+  const mongoose = require('mongoose');
+  const session = await mongoose.startSession();
+  
   try {
-    const { owner_id, test_ids, remarks } = req.body;
+    // Start transaction to ensure atomicity
+    session.startTransaction();
+    
+    const { owner_id, test_ids, remarks, doctor_id, is_urgent } = req.body;
 
     // Validate input
     if (!owner_id || !test_ids || test_ids.length === 0) {
+      await session.abortTransaction();
       return res.status(400).json({ message: '⚠️ Lab and tests are required' });
     }
 
@@ -269,39 +276,53 @@ exports.requestTests = async (req, res, next) => {
     const tests = await Test.find({ 
       _id: { $in: test_ids },
       owner_id: owner_id 
-    });
+    }).session(session);
 
     if (tests.length !== test_ids.length) {
+      await session.abortTransaction();
       return res.status(400).json({ message: '⚠️ Some tests are invalid or not available in this lab' });
     }
 
-    // Create order
-    const newOrder = new Order({
+    // If doctor_id provided, verify doctor exists
+    let doctor = null;
+    if (doctor_id) {
+      const Doctor = require('../models/Doctor');
+      doctor = await Doctor.findById(doctor_id).session(session);
+      if (!doctor) {
+        await session.abortTransaction();
+        return res.status(404).json({ message: '⚠️ Selected doctor not found' });
+      }
+    }
+
+    // Create order (within transaction)
+    const [newOrder] = await Order.create([{
       patient_id: req.user._id,
-      requested_by: null, // Self-requested
-      doctor_id: null,
+      requested_by: req.user._id, // Self-requested by patient
+      requested_by_model: 'Patient',
+      doctor_id: doctor_id || null, // Link to doctor if provided
       order_date: new Date(),
       status: 'processing',
-      remarks,
+      remarks: is_urgent ? 'urgent' : remarks, // Support urgent flag
       barcode: `ORD-${Date.now()}`,
-      owner_id
-    });
+      owner_id,
+      is_patient_registered: true
+    }], { session });
 
-    await newOrder.save();
-
-    // Create order details for each test
+    // Create order details for each test (within transaction)
     const orderDetails = test_ids.map(test_id => ({
       order_id: newOrder._id,
       test_id,
-      status: 'pending',
+      status: is_urgent ? 'urgent' : 'pending', // Set urgent status if requested
       sample_collected: false
     }));
 
-    await OrderDetails.insertMany(orderDetails);
+    await OrderDetails.insertMany(orderDetails, { session });
 
     // Calculate invoice
     const subtotal = tests.reduce((sum, test) => sum + (test.price || 0), 0);
-    const invoice = new Invoice({
+    
+    // Create invoice (within transaction)
+    const [invoice] = await Invoice.create([{
       order_id: newOrder._id,
       invoice_date: new Date(),
       subtotal,
@@ -309,28 +330,66 @@ exports.requestTests = async (req, res, next) => {
       total_amount: subtotal,
       payment_status: 'pending',
       owner_id
-    });
+    }], { session });
 
-    await invoice.save();
-
-    // Send notification to lab owner
-    await Notification.create({
+    // Send notification to lab owner (within transaction)
+    await Notification.create([{
       sender_id: req.user._id,
       sender_model: 'Patient',
       receiver_id: owner_id,
       receiver_model: 'Owner',
       type: 'system',
-      title: 'New Test Request',
-      message: `Patient has requested ${test_ids.length} test(s). Order ID: ${newOrder.barcode}`
-    });
+      title: is_urgent ? '🚨 Urgent Test Request from Patient' : 'New Test Request',
+      message: `Patient has requested ${test_ids.length} test(s). Order ID: ${newOrder.barcode}${is_urgent ? ' - URGENT' : ''}`
+    }], { session });
+
+    // If doctor is linked to this order, notify them too
+    if (doctor_id) {
+      await Notification.create([{
+        sender_id: req.user._id,
+        sender_model: 'Patient',
+        receiver_id: doctor_id,
+        receiver_model: 'Doctor',
+        type: 'system',
+        title: is_urgent ? '🚨 Your Patient Requested Urgent Tests' : 'Patient Test Request',
+        message: `${req.user.full_name.first} ${req.user.full_name.last} has requested ${test_ids.length} test(s). Order ID: ${newOrder.barcode}${is_urgent ? ' (URGENT)' : ''}`
+      }], { session });
+    }
+
+    // If urgent, notify all lab staff
+    if (is_urgent) {
+      const Staff = require('../models/Staff');
+      const labStaff = await Staff.find({ owner_id }).session(session);
+      
+      const staffNotifications = labStaff.map(staff => ({
+        sender_id: req.user._id,
+        sender_model: 'Patient',
+        receiver_id: staff._id,
+        receiver_model: 'Staff',
+        type: 'request',
+        title: '🚨 URGENT Test Request from Patient',
+        message: `Urgent test request for patient ${req.user.full_name.first} ${req.user.full_name.last}. Order: ${newOrder.barcode}`
+      }));
+
+      await Notification.insertMany(staffNotifications, { session });
+    }
+
+    // Commit transaction - all operations succeeded
+    await session.commitTransaction();
 
     res.status(201).json({
-      message: '✅ Test request submitted successfully',
-      order: await Order.findById(newOrder._id).populate('owner_id', 'name'),
-      invoice
+      message: `✅ Test request submitted successfully${is_urgent ? ' as URGENT' : ''}`,
+      order: await Order.findById(newOrder._id).populate('owner_id', 'name').populate('doctor_id', 'name'),
+      invoice,
+      doctor_notified: doctor_id ? true : false
     });
   } catch (err) {
+    // Rollback transaction on error
+    await session.abortTransaction();
     next(err);
+  } finally {
+    // End session
+    session.endSession();
   }
 };
 
@@ -656,7 +715,47 @@ exports.getInvoiceById = async (req, res, next) => {
   }
 };
 
-// ==================== AVAILABLE LABS & TESTS ====================
+// ==================== AVAILABLE LABS & TESTS & DOCTORS ====================
+
+/**
+ * @desc    Get Available Doctors (for linking to test orders)
+ * @route   GET /api/patient/doctors
+ * @access  Private (Patient)
+ */
+exports.getAvailableDoctors = async (req, res, next) => {
+  try {
+    const Doctor = require('../models/Doctor');
+    const { search } = req.query;
+    
+    const query = { is_active: true };
+    
+    // If search term provided, search by name
+    if (search && search.length >= 2) {
+      query.$or = [
+        { 'name.first': { $regex: search, $options: 'i' } },
+        { 'name.last': { $regex: search, $options: 'i' } },
+        { specialty: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    const doctors = await Doctor.find(query)
+      .select('name specialty phone_number email')
+      .limit(50);
+
+    res.json({ 
+      count: doctors.length, 
+      doctors: doctors.map(doc => ({
+        _id: doc._id,
+        name: `Dr. ${doc.name.first} ${doc.name.middle || ''} ${doc.name.last}`.trim(),
+        specialty: doc.specialty,
+        phone: doc.phone_number,
+        email: doc.email
+      }))
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 
 /**
  * @desc    Get Available Labs
