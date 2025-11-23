@@ -1,31 +1,27 @@
 /**
- * Send Email Utility
- * TODO: Implement actual email service (nodemailer, sendgrid, etc.)
+ * Send Email Utility using Nodemailer
  */
+
+const nodemailer = require('nodemailer');
+
+// Create transporter
+const createTransporter = () => {
+  return nodemailer.createTransporter({
+    service: 'gmail', // You can change this to your email service
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASSWORD
+    }
+  });
+};
 
 const sendEmail = async (to, subject, message) => {
   try {
-    // TODO: Replace with actual email service implementation
-    // For now, just log the email that would be sent
-    console.log('📧 Email would be sent:');
-    console.log(`To: ${to}`);
-    console.log(`Subject: ${subject}`);
-    console.log(`Message: ${message}`);
-    console.log('---');
-    
-    // Simulate successful email sending
-    return { success: true, message: 'Email logged (not actually sent)' };
-    
-    /* Example with nodemailer:
-    const nodemailer = require('nodemailer');
-    
-    const transporter = nodemailer.createTransport({
-      service: 'gmail', // or your email service
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD
-      }
-    });
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+      throw new Error('Email credentials not configured');
+    }
+
+    const transporter = createTransporter();
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -35,8 +31,9 @@ const sendEmail = async (to, subject, message) => {
     };
 
     const info = await transporter.sendMail(mailOptions);
+
+    console.log('📧 Email sent successfully:', info.messageId);
     return { success: true, messageId: info.messageId };
-    */
   } catch (error) {
     console.error('❌ Error sending email:', error);
     throw new Error(`Failed to send email: ${error.message}`);

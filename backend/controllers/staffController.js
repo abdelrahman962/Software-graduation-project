@@ -261,7 +261,14 @@ exports.collectSample = async (req, res) => {
     }
 
     const detail = await OrderDetails.findById(detail_id)
-      .populate('test_id', 'test_name sample_type tube_type')
+      .populate({
+        path: 'test_id',
+        select: 'test_name sample_type tube_type device_id method',
+        populate: {
+          path: 'device_id',
+          populate: { path: 'staff_id', select: 'full_name employee_number' }
+        }
+      })
       .populate('order_id');
 
     if (!detail) {
@@ -274,11 +281,60 @@ exports.collectSample = async (req, res) => {
       });
     }
 
+    // Auto-assign staff based on test's device
+    let assignedStaff = null;
+    let assignedDevice = null;
+    
+    if (detail.test_id.method === 'device' && detail.test_id.device_id) {
+      const device = detail.test_id.device_id;
+      
+      // Check if device is available
+      if (device.status !== 'active') {
+        return res.status(400).json({
+          message: `⚠️ Required device (${device.name}) is currently ${device.status}. Cannot collect sample.`
+        });
+      }
+      
+      // Auto-assign to device operator
+      if (device.staff_id) {
+        assignedStaff = device.staff_id;
+        assignedDevice = device;
+        
+        detail.device_id = device._id;
+        detail.staff_id = device.staff_id._id;
+        detail.assigned_at = new Date();
+        detail.status = 'assigned';
+        
+        // Notify assigned staff
+        await Notification.create({
+          sender_id: staff_id,
+          sender_model: 'Staff',
+          receiver_id: device.staff_id._id,
+          receiver_model: 'Staff',
+          type: 'system',
+          title: 'New Test Assigned',
+          message: `${detail.test_id.test_name} assigned to you. Device: ${device.name}`,
+          related_id: detail._id
+        });
+      }
+    }
+
+    // Generate barcode if order doesn't have one yet
+    if (!detail.order_id.barcode) {
+      const barcode = await Order.generateUniqueBarcode();
+      await Order.findByIdAndUpdate(detail.order_id._id, {
+        barcode,
+        status: 'processing'
+      });
+      detail.order_id.barcode = barcode;
+    }
+
     // Update sample collection
     detail.sample_collected = true;
     detail.sample_collected_date = new Date();
-    detail.status = 'collected';
-    detail.staff_id = staff_id; // Assign staff who collected sample
+    if (!assignedStaff) {
+      detail.status = 'collected';
+    }
 
     await detail.save();
 
@@ -305,7 +361,9 @@ exports.collectSample = async (req, res) => {
 
     res.json({ 
       success: true,
-      message: "✅ Sample collected successfully",
+      message: assignedStaff 
+        ? `✅ Sample collected and assigned to ${assignedStaff.full_name.first} ${assignedStaff.full_name.last}`
+        : "✅ Sample collected successfully",
       detail: {
         _id: detail._id,
         test_name: detail.test_id.test_name,
@@ -314,6 +372,17 @@ exports.collectSample = async (req, res) => {
         sample_collected: detail.sample_collected,
         sample_collected_date: detail.sample_collected_date,
         status: detail.status,
+        barcode: detail.order_id.barcode,
+        assigned_staff: assignedStaff ? {
+          staff_id: assignedStaff._id,
+          name: `${assignedStaff.full_name.first} ${assignedStaff.full_name.last}`,
+          employee_number: assignedStaff.employee_number
+        } : null,
+        assigned_device: assignedDevice ? {
+          device_id: assignedDevice._id,
+          name: assignedDevice.name,
+          serial_number: assignedDevice.serial_number
+        } : null,
         notes
       }
     });
@@ -619,11 +688,17 @@ exports.registerPatientFromOrder = async (req, res) => {
       });
     }
 
-    // Check if patient already exists (by identity_number or email)
+    // Check if patient already exists (by identity_number, email, or full name + phone)
     let patient = await Patient.findOne({
       $or: [
         { identity_number: order.temp_patient_info.identity_number },
-        { email: order.temp_patient_info.email }
+        { email: order.temp_patient_info.email },
+        {
+          'full_name.first': order.temp_patient_info.full_name.first,
+          'full_name.middle': order.temp_patient_info.full_name.middle,
+          'full_name.last': order.temp_patient_info.full_name.last,
+          phone_number: order.temp_patient_info.phone_number
+        }
       ]
     });
 
@@ -1025,16 +1100,25 @@ exports.markTestCompleted = async (req, res) => {
 exports.getMyAssignedTests = async (req, res) => {
   try {
     const staff_id = req.user.id;
+    const { status_filter, device_id } = req.query;
+
+    // Build query
+    let query = { staff_id };
+    if (status_filter) {
+      query.status = status_filter;
+    }
+    if (device_id) {
+      query.device_id = device_id;
+    }
 
     // Find all order details assigned to this staff member
-    // Sort by urgency first (urgent tests at the top)
-    const assignedTests = await OrderDetails.find({ staff_id })
+    const assignedTests = await OrderDetails.find(query)
       .populate({
         path: 'test_id',
-        select: 'test_name test_code sample_type device_id',
+        select: 'test_name test_code sample_type device_id method',
         populate: {
           path: 'device_id',
-          select: 'name serial_number'
+          select: 'name serial_number status'
         }
       })
       .populate({
@@ -1042,43 +1126,246 @@ exports.getMyAssignedTests = async (req, res) => {
         select: 'barcode order_date status patient_id remarks',
         populate: {
           path: 'patient_id',
-          select: 'full_name patient_id'
+          select: 'full_name patient_id phone_number'
         }
       })
+      .populate('device_id', 'name serial_number status')
+      .populate('collected_by', 'full_name employee_number')
       .sort({ 
-        status: 1,        // "urgent" before "pending" alphabetically
-        created_at: -1    // Then by newest first
+        status: 1,
+        assigned_at: -1
       })
       .lean();
 
-    res.json({
-      success: true,
-      count: assignedTests.length,
-      assigned_tests: assignedTests.map(detail => ({
+    // Group tests by status
+    const statusGroups = {
+      urgent: [],
+      assigned: [],
+      collected: [],
+      in_progress: [],
+      completed: []
+    };
+
+    // Get unique devices
+    const devices = new Set();
+
+    assignedTests.forEach(detail => {
+      const isUrgent = detail.status === 'urgent' || detail.order_id?.remarks === 'urgent';
+      
+      const testData = {
         detail_id: detail._id,
         test_name: detail.test_id?.test_name,
         test_code: detail.test_id?.test_code,
         sample_type: detail.test_id?.sample_type,
-        device: detail.test_id?.device_id ? {
-          name: detail.test_id.device_id.name,
-          serial_number: detail.test_id.device_id.serial_number
+        device: detail.device_id || detail.test_id?.device_id ? {
+          device_id: (detail.device_id || detail.test_id?.device_id)?._id,
+          name: (detail.device_id || detail.test_id?.device_id)?.name,
+          serial_number: (detail.device_id || detail.test_id?.device_id)?.serial_number,
+          status: (detail.device_id || detail.test_id?.device_id)?.status
+        } : null,
+        patient: detail.order_id?.patient_id ? {
+          name: `${detail.order_id.patient_id.full_name.first} ${detail.order_id.patient_id.full_name.last}`,
+          patient_id: detail.order_id.patient_id.patient_id,
+          phone: detail.order_id.patient_id.phone_number
+        } : null,
+        order_barcode: detail.order_id?.barcode,
+        order_date: detail.order_id?.order_date,
+        status: detail.status,
+        is_urgent: isUrgent,
+        sample_collected: detail.sample_collected,
+        sample_collected_date: detail.sample_collected_date,
+        assigned_at: detail.assigned_at,
+        result_uploaded: detail.result_id ? true : false
+      };
+
+      // Add to device set
+      if (testData.device?.device_id) {
+        devices.add(JSON.stringify(testData.device));
+      }
+
+      // Group by status
+      if (isUrgent && detail.status !== 'completed') {
+        statusGroups.urgent.push(testData);
+      } else {
+        statusGroups[detail.status]?.push(testData);
+      }
+    });
+
+    // Calculate statistics
+    const stats = {
+      total: assignedTests.length,
+      urgent: statusGroups.urgent.length,
+      assigned: statusGroups.assigned.length,
+      collected: statusGroups.collected.length,
+      in_progress: statusGroups.in_progress.length,
+      completed: statusGroups.completed.length,
+      pending_work: statusGroups.assigned.length + statusGroups.collected.length + statusGroups.in_progress.length + statusGroups.urgent.length
+    };
+
+    res.json({
+      success: true,
+      stats,
+      devices: Array.from(devices).map(d => JSON.parse(d)),
+      tests_by_status: statusGroups,
+      all_tests: assignedTests.map(detail => ({
+        detail_id: detail._id,
+        test_name: detail.test_id?.test_name,
+        test_code: detail.test_id?.test_code,
+        sample_type: detail.test_id?.sample_type,
+        device: detail.device_id || detail.test_id?.device_id ? {
+          name: (detail.device_id || detail.test_id?.device_id)?.name,
+          serial_number: (detail.device_id || detail.test_id?.device_id)?.serial_number
         } : null,
         patient: detail.order_id?.patient_id ? {
           name: `${detail.order_id.patient_id.full_name.first} ${detail.order_id.patient_id.full_name.last}`,
           patient_id: detail.order_id.patient_id.patient_id
         } : null,
         order_barcode: detail.order_id?.barcode,
-        order_date: detail.order_id?.order_date,
         status: detail.status,
         is_urgent: detail.status === 'urgent' || detail.order_id?.remarks === 'urgent',
         sample_collected: detail.sample_collected,
-        sample_collection_date: detail.sample_collection_date,
-        result_uploaded: detail.result_id ? true : false
+        assigned_at: detail.assigned_at
       }))
     });
 
   } catch (err) {
     console.error("Error fetching assigned tests:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Auto-assign tests based on device-staff relationship (bulk operation)
+ * @route   POST /api/staff/auto-assign-tests
+ * @access  Staff (Auth Required)
+ */
+exports.autoAssignTests = async (req, res) => {
+  try {
+    const { order_id } = req.body;
+    const staff_id = req.user.id;
+
+    if (!order_id) {
+      return res.status(400).json({ message: "order_id is required" });
+    }
+
+    // Get all order details for this order
+    const orderDetails = await OrderDetails.find({ 
+      order_id,
+      sample_collected: true,
+      staff_id: null  // Not yet assigned
+    }).populate({
+      path: 'test_id',
+      populate: {
+        path: 'device_id',
+        populate: { path: 'staff_id' }
+      }
+    });
+
+    if (orderDetails.length === 0) {
+      return res.status(404).json({ 
+        message: "No unassigned tests found for this order" 
+      });
+    }
+
+    const assignments = [];
+    const notifications = [];
+
+    for (const detail of orderDetails) {
+      if (detail.test_id.method === 'device' && detail.test_id.device_id) {
+        const device = detail.test_id.device_id;
+        
+        // Check if device is available
+        if (device.status !== 'active') {
+          assignments.push({
+            detail_id: detail._id,
+            test_name: detail.test_id.test_name,
+            status: 'skipped',
+            reason: `Device ${device.name} is ${device.status}`
+          });
+          continue;
+        }
+
+        // Check if device has assigned staff
+        if (!device.staff_id) {
+          assignments.push({
+            detail_id: detail._id,
+            test_name: detail.test_id.test_name,
+            status: 'skipped',
+            reason: `No staff assigned to device ${device.name}`
+          });
+          continue;
+        }
+
+        // Assign to device operator
+        detail.device_id = device._id;
+        detail.staff_id = device.staff_id._id;
+        detail.assigned_at = new Date();
+        detail.status = 'assigned';
+        await detail.save();
+
+        assignments.push({
+          detail_id: detail._id,
+          test_name: detail.test_id.test_name,
+          status: 'assigned',
+          assigned_to: {
+            staff_id: device.staff_id._id,
+            name: `${device.staff_id.full_name.first} ${device.staff_id.full_name.last}`
+          },
+          device: {
+            device_id: device._id,
+            name: device.name
+          }
+        });
+
+        // Create notification for assigned staff
+        notifications.push({
+          sender_id: staff_id,
+          sender_model: 'Staff',
+          receiver_id: device.staff_id._id,
+          receiver_model: 'Staff',
+          type: 'system',
+          title: 'New Test Assigned',
+          message: `${detail.test_id.test_name} assigned to you. Device: ${device.name}`,
+          related_id: detail._id
+        });
+      } else if (detail.test_id.method === 'manual') {
+        // Manual tests don't need device assignment
+        assignments.push({
+          detail_id: detail._id,
+          test_name: detail.test_id.test_name,
+          status: 'manual',
+          reason: 'Manual test - no device required'
+        });
+      }
+    }
+
+    // Send all notifications
+    if (notifications.length > 0) {
+      await Notification.insertMany(notifications);
+    }
+
+    // Log action
+    await logAction(
+      staff_id,
+      `Auto-assigned ${assignments.filter(a => a.status === 'assigned').length} tests for order ${order_id}`,
+      'Order',
+      order_id
+    );
+
+    res.json({
+      success: true,
+      message: `✅ ${assignments.filter(a => a.status === 'assigned').length} tests assigned successfully`,
+      assignments,
+      stats: {
+        total: assignments.length,
+        assigned: assignments.filter(a => a.status === 'assigned').length,
+        skipped: assignments.filter(a => a.status === 'skipped').length,
+        manual: assignments.filter(a => a.status === 'manual').length
+      }
+    });
+
+  } catch (err) {
+    console.error("Error auto-assigning tests:", err);
     res.status(500).json({ error: err.message });
   }
 };

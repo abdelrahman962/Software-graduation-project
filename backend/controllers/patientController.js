@@ -7,6 +7,8 @@ const Notification = require('../models/Notification');
 const Invoice = require('../models/Invoices');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const sendEmail = require('../utils/sendEmail');
+const sendSMS = require('../utils/sendSMS');
 
 // ==================== AUTHENTICATION ====================
 
@@ -294,7 +296,7 @@ exports.requestTests = async (req, res, next) => {
       }
     }
 
-    // Create order (within transaction)
+    // Create order (within transaction) - barcode generated when sample collected
     const [newOrder] = await Order.create([{
       patient_id: req.user._id,
       requested_by: req.user._id, // Self-requested by patient
@@ -303,7 +305,6 @@ exports.requestTests = async (req, res, next) => {
       order_date: new Date(),
       status: 'processing',
       remarks: is_urgent ? 'urgent' : remarks, // Support urgent flag
-      barcode: `ORD-${Date.now()}`,
       owner_id,
       is_patient_registered: true
     }], { session });
@@ -340,7 +341,7 @@ exports.requestTests = async (req, res, next) => {
       receiver_model: 'Owner',
       type: 'system',
       title: is_urgent ? '🚨 Urgent Test Request from Patient' : 'New Test Request',
-      message: `Patient has requested ${test_ids.length} test(s). Order ID: ${newOrder.barcode}${is_urgent ? ' - URGENT' : ''}`
+      message: `Patient ${req.user.full_name.first} ${req.user.full_name.last} has requested ${test_ids.length} test(s).${is_urgent ? ' - URGENT' : ''}`
     }], { session });
 
     // If doctor is linked to this order, notify them too
@@ -352,7 +353,7 @@ exports.requestTests = async (req, res, next) => {
         receiver_model: 'Doctor',
         type: 'system',
         title: is_urgent ? '🚨 Your Patient Requested Urgent Tests' : 'Patient Test Request',
-        message: `${req.user.full_name.first} ${req.user.full_name.last} has requested ${test_ids.length} test(s). Order ID: ${newOrder.barcode}${is_urgent ? ' (URGENT)' : ''}`
+        message: `${req.user.full_name.first} ${req.user.full_name.last} has requested ${test_ids.length} test(s).${is_urgent ? ' (URGENT)' : ''}`
       }], { session });
     }
 
@@ -368,7 +369,7 @@ exports.requestTests = async (req, res, next) => {
         receiver_model: 'Staff',
         type: 'request',
         title: '🚨 URGENT Test Request from Patient',
-        message: `Urgent test request for patient ${req.user.full_name.first} ${req.user.full_name.last}. Order: ${newOrder.barcode}`
+        message: `Urgent test request for patient ${req.user.full_name.first} ${req.user.full_name.last}.`
       }));
 
       await Notification.insertMany(staffNotifications, { session });
@@ -377,9 +378,41 @@ exports.requestTests = async (req, res, next) => {
     // Commit transaction - all operations succeeded
     await session.commitTransaction();
 
+    // Get lab and patient details for email
+    const LabOwner = require('../models/Owner');
+    const lab = await LabOwner.findById(owner_id);
+    const patient = await Patient.findById(req.user._id);
+
+    // Send confirmation email and SMS
+    const emailSubject = `Test Order Confirmation - ${lab.lab_name}`;
+    const emailMessage = `
+Hello ${patient.full_name.first},
+
+Your test order has been submitted successfully${is_urgent ? ' as URGENT' : ''}!
+
+Lab: ${lab.lab_name}
+Tests: ${tests.map(t => t.test_name).join(', ')}
+Total Cost: ${subtotal} ILS
+
+Next Steps:
+1. Visit ${lab.lab_name} for sample collection
+2. Bring your ID for verification
+3. Results will be available in your account after processing
+
+${is_urgent ? '⚠️ This is an URGENT test request. Please visit the lab immediately.' : ''}
+
+Lab Contact: ${lab.phone_number}
+
+Best regards,
+MedLab System
+    `;
+
+    await sendEmail(patient.email, emailSubject, emailMessage);
+    await sendSMS(patient.phone_number, `Your test order at ${lab.lab_name} is confirmed${is_urgent ? ' (URGENT)' : ''}. ${tests.length} test(s), Total: ${subtotal} ILS. Visit lab for sample collection.`);
+
     res.status(201).json({
-      message: `✅ Test request submitted successfully${is_urgent ? ' as URGENT' : ''}`,
-      order: await Order.findById(newOrder._id).populate('owner_id', 'name').populate('doctor_id', 'name'),
+      message: `✅ Test request submitted successfully${is_urgent ? ' as URGENT' : ''}. Confirmation sent to your email and phone.`,
+      order: await Order.findById(newOrder._id).populate('owner_id', 'lab_name').populate('doctor_id', 'name'),
       invoice,
       doctor_notified: doctor_id ? true : false
     });

@@ -2,6 +2,7 @@
 const cron = require('node-cron');
 const LabOwner = require('./models/Owner'); 
 const Notification = require('./models/Notification');
+const logger = require('./utils/logger');
 
 // 🕒 Daily subscription check & suspension job
 cron.schedule('0 8 * * *', async () => { // runs every day at 08:00
@@ -61,9 +62,9 @@ cron.schedule('0 8 * * *', async () => { // runs every day at 08:00
       }
     }
 
-    console.log('✅ Daily subscription check & notifications completed without duplicates.');
+    logger.info('Daily subscription check & notifications completed without duplicates.');
   } catch (err) {
-    console.error('❌ Error in subscription cron job:', err);
+    logger.error('Error in subscription cron job', { error: err.message, stack: err.stack });
   }
 });
 module.exports = cron;

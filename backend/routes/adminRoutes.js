@@ -25,6 +25,7 @@ router.put('/notifications/:notificationId/read', adminController.markNotificati
 
 // 📊 Dashboard & subscriptions
 router.get('/dashboard', adminController.getDashboard);
+router.get('/stats', adminController.getStats);
 router.get('/expiring-subscriptions', adminController.getExpiringSubscriptions);
 
 module.exports = router;

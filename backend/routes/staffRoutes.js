@@ -192,6 +192,18 @@ router.put(
   staffController.markTestCompleted
 );
 
+/**
+ * @route   POST /api/staff/auto-assign-tests
+ * @desc    Auto-assign tests based on device-staff relationship for an order
+ * @access  Private (Staff)
+ */
+router.post(
+  "/auto-assign-tests",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  staffController.autoAssignTests
+);
+
 // ===============================
 // ✅ Export Router
 // ===============================

@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const addressSchema = require('./schemas/addressSchema');
 
 const staffSchema = new mongoose.Schema({
   full_name: {
@@ -12,7 +13,7 @@ const staffSchema = new mongoose.Schema({
   gender: { type: String, enum: ["Male", "Female", "Other"], required: true },
   social_status: { type: String, enum: ["Single", "Married", "Divorced", "Widowed"] },
   phone_number: { type: String, required: true },
-  address: { type: String },
+  address: addressSchema,
   qualification: { type: String },
   profession_license: { type: String },
   employee_number: { type: String, unique: true },

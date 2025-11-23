@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const addressSchema = require('./schemas/addressSchema');
 
 const patientSchema = new mongoose.Schema({
   full_name: { 
@@ -12,7 +13,7 @@ const patientSchema = new mongoose.Schema({
   gender: { type: String, enum: ['Male', 'Female', 'Other'] },
   social_status: { type: String, enum: ['Single', 'Married', 'Divorced', 'Widowed'] },
   phone_number: String,
-  address: String,
+  address: addressSchema,
   patient_id: { type: String, unique: true },
   insurance_provider: String,
   insurance_number: String,

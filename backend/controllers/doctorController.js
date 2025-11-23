@@ -9,6 +9,8 @@ const Result = require('../models/Result');
 const Notification = require('../models/Notification');
 const LabOwner = require('../models/Owner');
 const jwt = require('jsonwebtoken');
+const sendEmail = require('../utils/sendEmail');
+const sendSMS = require('../utils/sendSMS');
 
 // ✅ Doctor Login
 exports.loginDoctor = async (req, res) => {
@@ -77,7 +79,7 @@ exports.requestTestForPatient = async (req, res) => {
       });
     }
 
-    // Create order (within transaction)
+    // Create order (within transaction) - barcode will be generated when sample collected
     const newOrder = await Order.create([{
       patient_id: patient._id,
       requested_by: doctor_id,
@@ -86,7 +88,6 @@ exports.requestTestForPatient = async (req, res) => {
       order_date: new Date(),
       status: 'processing',
       remarks: is_urgent ? 'urgent' : remarks,
-      barcode: `ORD-${Date.now()}`,
       owner_id,
       is_patient_registered: true
     }], { session });
@@ -121,7 +122,7 @@ exports.requestTestForPatient = async (req, res) => {
       receiver_model: 'Patient',
       type: 'test_result',
       title: 'Test Ordered by Doctor',
-      message: `Dr. ${req.user.username || 'Your doctor'} has ordered ${test_ids.length} test(s) for you. Order ID: ${newOrder[0].barcode}${is_urgent ? ' (URGENT)' : ''}`
+      message: `Dr. ${req.user.username || 'Your doctor'} has ordered ${test_ids.length} test(s) for you.${is_urgent ? ' (URGENT)' : ''} Please visit ${lab.lab_name} for sample collection.`
     }], { session });
 
     // Send notification to lab owner
@@ -132,7 +133,7 @@ exports.requestTestForPatient = async (req, res) => {
       receiver_model: 'Owner',
       type: 'request',
       title: is_urgent ? 'Urgent Test Request from Doctor' : 'New Test Request from Doctor',
-      message: `Doctor has requested ${test_ids.length} test(s) for patient. Order ID: ${newOrder[0].barcode}${is_urgent ? ' - URGENT PROCESSING REQUIRED' : ''}`
+      message: `Doctor has requested ${test_ids.length} test(s) for patient ${patient.full_name.first} ${patient.full_name.last}.${is_urgent ? ' - URGENT PROCESSING REQUIRED' : ''}`
     }], { session });
 
     // If urgent, notify all staff at the lab
@@ -147,7 +148,7 @@ exports.requestTestForPatient = async (req, res) => {
         receiver_model: 'Staff',
         type: 'request',
         title: '🚨 URGENT Test Request',
-        message: `Urgent test order from doctor for patient ${patient.full_name.first} ${patient.full_name.last}. Order: ${newOrder[0].barcode}`
+        message: `Urgent test order from doctor for patient ${patient.full_name.first} ${patient.full_name.last}.`
       }));
 
       await Notification.insertMany(staffNotifications, { session });
@@ -156,12 +157,39 @@ exports.requestTestForPatient = async (req, res) => {
     // Commit transaction
     await session.commitTransaction();
 
+    // Send email and SMS to patient after transaction commits
+    const emailSubject = `Test Order from Dr. ${req.user.username || 'Your Doctor'}`;
+    const emailMessage = `
+Hello ${patient.full_name.first},
+
+Dr. ${req.user.username || 'Your doctor'} has ordered ${test_ids.length} test(s) for you${is_urgent ? ' (URGENT)' : ''}.
+
+Lab: ${lab.lab_name}
+Tests: ${tests.map(t => t.test_name).join(', ')}
+Total Cost: ${subtotal} ILS
+
+Next Steps:
+1. Visit ${lab.lab_name} at your earliest convenience
+2. Bring your ID for verification
+3. Sample will be collected and processed
+4. Results will be available in your account
+
+${is_urgent ? '⚠️ This is an URGENT test request. Please visit the lab immediately.' : ''}
+
+Lab Contact: ${lab.phone_number}
+
+Best regards,
+MedLab System
+    `;
+
+    await sendEmail(patient.email, emailSubject, emailMessage);
+    await sendSMS(patient.phone_number, `Dr. ${req.user.username} ordered ${test_ids.length} test(s) for you${is_urgent ? ' (URGENT)' : ''}. Visit ${lab.lab_name} for sample collection. Tests: ${tests.map(t => t.test_name).join(', ')}`);
+
     res.status(201).json({
       success: true,
-      message: `✅ Test request submitted successfully${is_urgent ? ' as URGENT' : ''}`,
+      message: `✅ Test request submitted successfully${is_urgent ? ' as URGENT' : ''}. Patient notified via email and SMS.`,
       order: {
         _id: newOrder[0]._id,
-        barcode: newOrder[0].barcode,
         status: newOrder[0].status,
         is_urgent,
         patient: {
@@ -182,6 +210,7 @@ exports.requestTestForPatient = async (req, res) => {
         _id: invoice[0]._id,
         total_amount: invoice[0].total_amount,
         payment_status: invoice[0].payment_status
+        
       }
     });
 

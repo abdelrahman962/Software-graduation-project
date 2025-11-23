@@ -34,9 +34,7 @@ const ownerSchema = new mongoose.Schema({
     type: String, 
     required: true 
   },
-  address: { 
-    type: String 
-  },
+  address: require('./schemas/addressSchema'),
   qualification: { 
     type: String 
   },

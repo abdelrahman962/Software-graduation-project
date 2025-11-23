@@ -24,4 +24,39 @@ router.get('/labs', publicController.getAvailableLabs);
  */
 router.get('/labs/:labId/tests', publicController.getLabTests);
 
+/**
+ * @route   GET /api/public/branches/all
+ * @desc    Get all available lab branches with pagination
+ * @access  Public
+ */
+router.get('/branches/all', publicController.getAllAvailableBranches);
+
+/**
+ * @route   GET /api/public/branches/nearest
+ * @desc    Find nearest lab branches by GPS coordinates
+ * @access  Public
+ */
+router.get('/branches/nearest', publicController.findNearestBranches);
+
+/**
+ * @route   GET /api/public/branches/search
+ * @desc    Search branches by city, state, or services
+ * @access  Public
+ */
+router.get('/branches/search', publicController.searchBranches);
+
+/**
+ * @route   GET /api/public/register/verify/:token
+ * @desc    Verify registration token and get order details
+ * @access  Public
+ */
+router.get('/register/verify/:token', publicController.verifyRegistrationToken);
+
+/**
+ * @route   POST /api/public/register/complete
+ * @desc    Complete patient registration using token
+ * @access  Public
+ */
+router.post('/register/complete', publicController.completeRegistration);
+
 module.exports = router;

@@ -513,3 +513,66 @@ exports.getDashboard = async (req, res, next) => {
     next(err);
   }
 };
+
+/**
+ * @desc    Get System Statistics
+ * @route   GET /api/admin/stats
+ * @access  Private (Admin)
+ */
+exports.getStats = async (req, res, next) => {
+  try {
+    const Patient = require('../models/Patient');
+    const Doctor = require('../models/Doctor');
+    const Staff = require('../models/Staff');
+    const Order = require('../models/Order');
+    const Invoice = require('../models/Invoices');
+
+    // Get counts
+    const [activeLabs, totalPatients, totalDoctors, totalStaff, totalOrders, activeSubscriptions] = await Promise.all([
+      LabOwner.countDocuments({ is_active: true }),
+      Patient.countDocuments(),
+      Doctor.countDocuments(),
+      Staff.countDocuments(),
+      Order.countDocuments(),
+      LabOwner.countDocuments({ 
+        is_active: true, 
+        subscription_end: { $gte: new Date() } 
+      })
+    ]);
+
+    // Calculate total revenue from paid invoices
+    const revenueResult = await Invoice.aggregate([
+      { $match: { status: 'Paid' } },
+      { $group: { _id: null, totalRevenue: { $sum: '$total_amount' } } }
+    ]);
+    const totalRevenue = revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
+
+    // Get recent activity (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const [recentLabs, recentOrders] = await Promise.all([
+      LabOwner.countDocuments({ created_at: { $gte: thirtyDaysAgo } }),
+      Order.countDocuments({ created_at: { $gte: thirtyDaysAgo } })
+    ]);
+
+    res.json({
+      success: true,
+      stats: {
+        activeLabs,
+        totalPatients,
+        totalDoctors,
+        totalStaff,
+        totalOrders,
+        activeSubscriptions,
+        totalRevenue: totalRevenue.toFixed(2),
+        recentActivity: {
+          newLabsLast30Days: recentLabs,
+          ordersLast30Days: recentOrders
+        }
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
