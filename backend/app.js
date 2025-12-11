@@ -43,7 +43,6 @@ app.use(logger.httpLogger);
 // }));
 
 // Routes
-app.use('/api/branches', require('./routes/labBranchRoutes')); // Lab branches & public endpoints (merged)
 app.use('/api/public', require('./routes/publicRoutes')); // Legacy public routes (kept for backwards compatibility)
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/owner', require('./routes/ownerRoutes'));

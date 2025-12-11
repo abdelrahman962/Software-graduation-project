@@ -5,6 +5,7 @@ const Result = require('../models/Result');
 const Test = require('../models/Test');
 const Notification = require('../models/Notification');
 const Invoice = require('../models/Invoices');
+const Feedback = require('../models/Feedback');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const sendEmail = require('../utils/sendEmail');
@@ -64,6 +65,11 @@ exports.login = async (req, res, next) => {
         _id: patient._id,
         patient_id: patient.patient_id,
         full_name: patient.full_name,
+        identity_number: patient.identity_number,
+        birthday: patient.birthday,
+        gender: patient.gender,
+        insurance_provider: patient.insurance_provider,
+        insurance_number: patient.insurance_number,
         email: patient.email,
         username: patient.username
       }
@@ -119,7 +125,24 @@ exports.updateProfile = async (req, res, next) => {
     // Update allowed fields
     if (full_name) patient.full_name = full_name;
     if (phone_number) patient.phone_number = phone_number;
-    if (address) patient.address = address;
+    if (address) {
+      // Convert string address to proper format matching addressSchema.js
+      if (typeof address === 'string') {
+        const addressParts = address.split(',').map(part => part.trim());
+        patient.address = {
+          street: addressParts[0] || '',
+          city: addressParts[1] || '',
+          country: addressParts[2] || 'Palestine'
+        };
+      } else {
+        // Ensure only schema fields are used
+        patient.address = {
+          street: address.street || '',
+          city: address.city || '',
+          country: address.country || 'Palestine'
+        };
+      }
+    }
     if (email) patient.email = email;
     if (social_status) patient.social_status = social_status;
     if (insurance_provider) patient.insurance_provider = insurance_provider;
@@ -429,7 +452,138 @@ MedLab System
 // ==================== TEST RESULTS ====================
 
 /**
- * @desc    Get All Test Results
+ * @desc    Get Order Summaries with Results
+ * @route   GET /api/patient/orders-with-results
+ * @access  Private (Patient)
+ */
+exports.getOrdersWithResults = async (req, res, next) => {
+  try {
+    // Get all patient's orders
+    const orders = await Order.find({ patient_id: req.user._id })
+      .populate('doctor_id', 'name')
+      .sort({ order_date: -1 });
+
+    // Get order summaries with test count and status
+    const orderSummaries = await Promise.all(
+      orders.map(async (order) => {
+        const details = await OrderDetails.find({ order_id: order._id })
+          .populate('test_id', 'test_name');
+
+        const completedCount = details.filter(d => d.status === 'completed').length;
+        const inProgressCount = details.filter(d => d.status === 'in_progress').length;
+        const pendingCount = details.filter(d => d.status === 'pending').length;
+
+        // Get doctor name if available
+        const doctorName = order.doctor_id?.name
+          ? `Dr. ${order.doctor_id.name.first} ${order.doctor_id.name.middle || ''} ${order.doctor_id.name.last}`.trim()
+          : null;
+
+        return {
+          order_id: order._id,
+          barcode: order.barcode,
+          order_date: order.order_date,
+          doctor_name: doctorName,
+          total_tests: details.length,
+          completed_tests: completedCount,
+          in_progress_tests: inProgressCount,
+          pending_tests: pendingCount,
+          status: order.status,
+          has_results: completedCount > 0
+        };
+      })
+    );
+
+    res.json({ count: orderSummaries.length, orders: orderSummaries });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get All Test Results for Specific Order
+ * @route   GET /api/patient/orders/:orderId/results
+ * @access  Private (Patient)
+ */
+exports.getOrderResults = async (req, res, next) => {
+  try {
+    // Verify order belongs to patient
+    const order = await Order.findOne({
+      _id: req.params.orderId,
+      patient_id: req.user._id
+    })
+      .populate('doctor_id', 'name')
+      .populate('owner_id', 'lab_name name address phone_number');
+
+    if (!order) {
+      return res.status(404).json({ message: '❌ Order not found' });
+    }
+
+    // Get order details with results
+    const details = await OrderDetails.find({ order_id: order._id })
+      .populate('test_id', 'test_name test_code reference_range units')
+      .populate('staff_id', 'full_name')
+      .sort({ createdAt: 1 });
+
+    // Get results for completed tests
+    const detailIds = details
+      .filter(d => d.status === 'completed')
+      .map(d => d._id);
+    const results = await Result.find({ detail_id: { $in: detailIds } });
+
+    // Combine details with results
+    const resultsWithDetails = details.map(detail => {
+      const result = detail.status === 'completed' 
+        ? results.find(r => r.detail_id.toString() === detail._id.toString())
+        : null;
+      
+      return {
+        detail_id: detail._id,
+        test_name: detail.test_id?.test_name || 'Unknown Test',
+        test_code: detail.test_id?.test_code || 'N/A',
+        status: detail.status,
+        test_result: result?.result_value || (detail.status === 'in_progress' ? 'In Progress' : 'Pending'),
+        units: result?.units || detail.test_id?.units || 'N/A',
+        reference_range: detail.test_id?.reference_range || 'N/A',
+        remarks: result?.remarks || null,
+        createdAt: result?.createdAt || detail.createdAt,
+        staff: detail.staff_id,
+        result: result || null
+      };
+    });
+
+    // Get doctor name if available
+    const doctorName = order.doctor_id?.name
+      ? `Dr. ${order.doctor_id.name.first} ${order.doctor_id.name.middle || ''} ${order.doctor_id.name.last}`.trim()
+      : null;
+
+    // Get lab name and address if available
+    const labName = order.owner_id?.lab_name || 'Medical Laboratory';
+    const labAddress = order.owner_id?.address
+      ? `${order.owner_id.address.street || ''}, ${order.owner_id.address.city || ''}, ${order.owner_id.address.state || ''} ${order.owner_id.address.postal_code || ''}`.trim().replace(/^,\s*/, '').replace(/,\s*$/, '')
+      : null;
+    const labPhone = order.owner_id?.phone_number || null;
+
+    res.json({
+      order: {
+        order_id: order._id,
+        barcode: order.barcode,
+        order_date: order.order_date,
+        doctor_name: doctorName,
+        lab_name: labName,
+        lab_address: labAddress,
+        lab_phone: labPhone,
+        status: order.status
+      },
+      results: resultsWithDetails,
+      count: resultsWithDetails.length
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get All Test Results (Legacy - for backward compatibility)
  * @route   GET /api/patient/results
  * @access  Private (Patient)
  */
@@ -439,29 +593,50 @@ exports.getMyResults = async (req, res, next) => {
     const orders = await Order.find({ patient_id: req.user._id });
     const orderIds = orders.map(o => o._id);
 
-    // Get completed order details
-    const completedDetails = await OrderDetails.find({
+    // Get completed and in-progress order details
+    const activeDetails = await OrderDetails.find({
       order_id: { $in: orderIds },
-      status: 'completed'
+      status: { $in: ['in_progress', 'completed'] }
     })
-      .populate('order_id')
-      .populate('test_id', 'test_name test_code')
+      .populate({
+        path: 'order_id',
+        populate: { path: 'doctor_id', select: 'name' }
+      })
+      .populate('test_id', 'test_name test_code reference_range units')
       .populate('staff_id', 'full_name')
       .sort({ 'order_id.order_date': -1 });
 
-    // Get results for these details
-    const detailIds = completedDetails.map(d => d._id);
+    // Get results for these details (only for completed tests)
+    const detailIds = activeDetails
+      .filter(d => d.status === 'completed')
+      .map(d => d._id);
     const results = await Result.find({ detail_id: { $in: detailIds } })
       .populate('detail_id');
 
     // Combine details with results
-    const resultsWithDetails = completedDetails.map(detail => {
-      const result = results.find(r => r.detail_id._id.toString() === detail._id.toString());
+    const resultsWithDetails = activeDetails.map(detail => {
+      const result = detail.status === 'completed' 
+        ? results.find(r => r.detail_id._id.toString() === detail._id.toString())
+        : null;
+      
+      // Get doctor name if available
+      const doctorName = detail.order_id?.doctor_id?.name
+        ? `Dr. ${detail.order_id.doctor_id.name.first} ${detail.order_id.doctor_id.name.middle || ''} ${detail.order_id.doctor_id.name.last}`.trim()
+        : null;
+      
       return {
         order_id: detail.order_id._id,
         order_barcode: detail.order_id.barcode,
         order_date: detail.order_id.order_date,
-        test: detail.test_id,
+        doctor_name: doctorName,
+        test_name: detail.test_id?.test_name || 'Unknown Test',
+        test_code: detail.test_id?.test_code || 'N/A',
+        status: detail.status, // Add status field
+        test_result: result?.result_value || (detail.status === 'in_progress' ? 'In Progress' : 'N/A'),
+        units: result?.units || detail.test_id?.units || 'N/A',
+        reference_range: detail.test_id?.reference_range || 'N/A',
+        remarks: result?.remarks || null,
+        createdAt: result?.createdAt || detail.order_id.order_date,
         staff: detail.staff_id,
         result: result || null
       };
@@ -651,7 +826,7 @@ exports.getNotifications = async (req, res, next) => {
     }
 
     const notifications = await Notification.find(query)
-      .sort({ created_at: -1 })
+      .sort({ createdAt: -1 })
       .populate('sender_id', 'name username full_name');
 
     res.json({ count: notifications.length, notifications });
@@ -894,7 +1069,7 @@ exports.getDashboard = async (req, res, next) => {
       receiver_id: req.user._id,
       receiver_model: 'Patient'
     })
-      .sort({ created_at: -1 })
+      .sort({ createdAt: -1 })
       .limit(5);
 
     res.json({
@@ -906,7 +1081,8 @@ exports.getDashboard = async (req, res, next) => {
       tests: {
         pending: pendingTests,
         inProgress: inProgressTests,
-        completed: completedTests
+        completed: completedTests,
+        visibleInResults: inProgressTests + completedTests // Tests patient can see in results tab
       },
       recentResults,
       invoices: {
@@ -919,6 +1095,170 @@ exports.getDashboard = async (req, res, next) => {
       notifications: {
         unread: unreadNotifications,
         recent: recentNotifications
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ==================== FEEDBACK ====================
+
+/**
+ * @desc    Provide Feedback on Lab, Test, or Order
+ * @route   POST /api/patient/feedback
+ * @access  Private (Patient)
+ */
+exports.provideFeedback = async (req, res, next) => {
+  try {
+    const { target_type, target_id, rating, message, is_anonymous } = req.body;
+
+    // Validate required fields
+    if (!target_type || !rating) {
+      return res.status(400).json({ message: '⚠️ Target type and rating are required' });
+    }
+
+    // Validate target_type
+    const validTargetTypes = ['lab', 'test', 'order', 'system'];
+    if (!validTargetTypes.includes(target_type)) {
+      return res.status(400).json({ message: '⚠️ Invalid target type. Must be lab, test, order, or system' });
+    }
+
+    // For non-system feedback, target_id is required
+    if (target_type !== 'system' && !target_id) {
+      return res.status(400).json({ message: '⚠️ Target ID is required for non-system feedback' });
+    }
+
+    // Validate rating (1-5)
+    if (rating < 1 || rating > 5) {
+      return res.status(400).json({ message: '⚠️ Rating must be between 1 and 5' });
+    }
+
+    // Validate target exists and patient has access (skip for system feedback)
+    let targetExists = target_type === 'system';
+    let targetOwnerId = null;
+
+    if (target_type !== 'system') {
+      switch (target_type) {
+        case 'lab':
+          const Owner = require('../models/Owner');
+          const lab = await Owner.findById(target_id);
+          if (lab) {
+            targetExists = true;
+            targetOwnerId = lab._id;
+          }
+          break;
+        case 'test':
+          const test = await Test.findById(target_id);
+          if (test) {
+            targetExists = true;
+            targetOwnerId = test.owner_id;
+          }
+          break;
+        case 'order':
+          const order = await Order.findOne({
+            _id: target_id,
+            patient_id: req.user._id
+          });
+          if (order) {
+            targetExists = true;
+            targetOwnerId = order.owner_id;
+          }
+          break;
+      }
+
+      if (!targetExists) {
+        return res.status(404).json({ message: '❌ Target not found or access denied' });
+      }
+    }
+
+    // Create feedback
+    const feedback = new Feedback({
+      user_id: req.user._id,
+      user_model: 'Patient',
+      target_type,
+      target_id: target_type === 'system' ? null : target_id,
+      rating,
+      message: message || '',
+      is_anonymous: is_anonymous || false
+    });
+
+    await feedback.save();
+
+    // Send notification to lab owner (skip for system feedback)
+    if (targetOwnerId) {
+      await Notification.create({
+        sender_id: req.user._id,
+        sender_model: 'Patient',
+        receiver_id: targetOwnerId,
+        receiver_model: 'Owner',
+        type: 'feedback',
+        title: '⭐ New Feedback Received',
+        message: `Patient ${req.user.full_name.first} ${req.user.full_name.last} provided ${rating}-star feedback on your ${target_type}`
+      });
+    }
+
+    res.status(201).json({
+      message: '✅ Feedback submitted successfully',
+      feedback: {
+        _id: feedback._id,
+        rating: feedback.rating,
+        message: feedback.message,
+        is_anonymous: feedback.is_anonymous,
+        createdAt: feedback.createdAt
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get My Feedback History
+ * @route   GET /api/patient/feedback
+ * @access  Private (Patient)
+ */
+exports.getMyFeedback = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 10, target_type } = req.query;
+
+    const query = {
+      user_id: req.user._id,
+      user_model: 'Patient'
+    };
+
+    if (target_type) {
+      query.target_type = target_type;
+    }
+
+    const feedback = await Feedback.find(query)
+      .populate({
+        path: 'target_id',
+        select: 'name lab_name test_name barcode',
+        model: function(doc) {
+          switch (doc.target_type) {
+            case 'lab': return 'Owner';
+            case 'test': return 'Test';
+            case 'order': return 'Order';
+            case 'system': return null; // System feedback has no specific target
+            default: return null;
+          }
+        }
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Feedback.countDocuments(query);
+
+    res.json({
+      success: true,
+      feedbacks: feedback,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
       }
     });
   } catch (err) {

@@ -6,6 +6,7 @@ const {
   resultUploadLimiter, 
   sampleCollectionLimiter 
 } = require('../middleware/rateLimitMiddleware');
+const inventoryController = require('../controllers/inventoryController');
 const { recordStockUsage } = require('../controllers/inventoryController');
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -92,6 +93,29 @@ router.post(
   roleMiddleware(['Staff']),        // Ensure only Staff can use this route
   recordStockUsage
 );
+
+// 📦 Inventory Issue Reporting (Staff Only)
+// ===============================
+router.post(
+  "/report-inventory-issue",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  staffController.reportInventoryIssue
+);
+
+router.post(
+  "/consume-inventory",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  staffController.consumeInventory
+);
+
+router.get(
+  "/inventory",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  staffController.getInventoryItems
+);
 /**
  * @route   GET /api/staff/dashboard
  * @desc    Get staff dashboard summary (tests, notifications, devices, inventory)
@@ -105,8 +129,20 @@ router.get(
 );
 
 // ===============================
-// 📋 Pending Orders (from public submissions)
+// 📋 Orders Management
 // ===============================
+
+/**
+ * @route   GET /api/staff/orders
+ * @desc    Get all orders for the lab (all statuses)
+ * @access  Private (Staff)
+ */
+router.get(
+  "/orders",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  staffController.getAllLabOrders
+);
 
 /**
  * @route   GET /api/staff/pending-orders
@@ -202,6 +238,58 @@ router.post(
   authMiddleware,
   roleMiddleware(['Staff']),
   staffController.autoAssignTests
+);
+
+/**
+ * @route   POST /api/staff/generate-sample-barcode/:detail_id
+ * @desc    Generate barcode for a sample/test (can be called before sample collection)
+ * @access  Private (Staff)
+ */
+router.post(
+  "/generate-sample-barcode/:detail_id",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  staffController.generateSampleBarcode
+);
+
+/**
+ * @route   POST /api/staff/generate-barcode/:order_id
+ * @desc    Generate barcode for an order (can be called before sample collection)
+ * @access  Private (Staff)
+ */
+router.post(
+  "/generate-barcode/:order_id",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  staffController.generateBarcode
+);
+
+// ==================== FEEDBACK ROUTES ====================
+
+/**
+ * @route   POST /api/staff/feedback
+ * @desc    Provide feedback on lab, test, or order
+ * @access  Private (Staff)
+ */
+router.post(
+  "/feedback",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  ...staffValidator.validateFeedback,
+  validateRequest,
+  staffController.provideFeedback
+);
+
+/**
+ * @route   GET /api/staff/feedback
+ * @desc    Get my feedback history
+ * @access  Private (Staff)
+ */
+router.get(
+  "/feedback",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  staffController.getMyFeedback
 );
 
 // ===============================

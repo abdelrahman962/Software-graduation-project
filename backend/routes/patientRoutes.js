@@ -92,6 +92,20 @@ router.post('/request-tests',
 // ==================== TEST RESULTS ROUTES ====================
 
 /**
+ * @route   GET /api/patient/orders-with-results
+ * @desc    Get order summaries with result counts
+ * @access  Private (Patient)
+ */
+router.get('/orders-with-results', authMiddleware, roleMiddleware(['patient']), patientController.getOrdersWithResults);
+
+/**
+ * @route   GET /api/patient/orders/:orderId/results
+ * @desc    Get all results for specific order
+ * @access  Private (Patient)
+ */
+router.get('/orders/:orderId/results', authMiddleware, roleMiddleware(['patient']), patientController.getOrderResults);
+
+/**
  * @route   GET /api/patient/results
  * @desc    Get all test results
  * @access  Private (Patient)
@@ -206,6 +220,32 @@ router.get('/labs/:labId/tests',
   ...patientValidator.validateLabId, 
   validateRequest, 
   patientController.getLabTests
+);
+
+// ==================== FEEDBACK ROUTES ====================
+
+/**
+ * @route   POST /api/patient/feedback
+ * @desc    Provide feedback on lab, test, or order
+ * @access  Private (Patient)
+ */
+router.post('/feedback', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  ...patientValidator.validateFeedback, 
+  validateRequest, 
+  patientController.provideFeedback
+);
+
+/**
+ * @route   GET /api/patient/feedback
+ * @desc    Get my feedback history
+ * @access  Private (Patient)
+ */
+router.get('/feedback', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  patientController.getMyFeedback
 );
 
 // ==================== DASHBOARD ROUTE ====================

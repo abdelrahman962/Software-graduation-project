@@ -6,8 +6,10 @@ const OrderDetails = require("../models/OrderDetails");
 const Result = require("../models/Result");
 const Invoice = require("../models/Invoices");
 const { Inventory } = require("../models/Inventory");
+const { StockOutput } = require("../models/Inventory");
 const Device = require("../models/Device");
 const Notification = require("../models/Notification");
+const Feedback = require("../models/Feedback");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const sendEmail = require("../utils/sendEmail");
@@ -18,9 +20,13 @@ const logAction = require("../utils/logAction");
 exports.loginStaff = async (req, res) => {
   try {
     const { username, password } = req.body;
-    const staff = await Staff.findOne({ username });
+    console.log('Login attempt:', { username, passwordProvided: !!password });
+
+    const staff = await Staff.findOne({ $or: [{ username }, { email: username }] });
+    console.log('Staff found:', staff ? { id: staff._id, username: staff.username, email: staff.email, hasPassword: !!staff.password } : 'No staff found');
 
     if (!staff || !(await staff.comparePassword(password))) {
+      console.log('Login failed: invalid credentials');
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
@@ -36,7 +42,7 @@ exports.loginStaff = async (req, res) => {
     await staff.save();
 
     // ✅ Log the action for tracking by the lab owner
-    await logAction(staff._id, `Staff ${staff.username} logged in at ${staff.last_login}`);
+    await logAction(staff._id, staff.username, `Staff logged in at ${staff.last_login}`);
 
     const token = jwt.sign({ id: staff._id, role:'Staff', username:staff.username }, process.env.JWT_SECRET, { expiresIn: "7d" });
     res.json({ message: "Login successful", token, staff });
@@ -65,6 +71,11 @@ exports.uploadResult = async (req, res) => {
       });
 
     if (!detail) return res.status(404).json({ message: "Order detail not found" });
+
+    // Check if the test is assigned to this staff
+    if (!detail.staff_id || detail.staff_id.toString() !== staff_id.toString()) {
+      return res.status(403).json({ message: "You are not authorized to upload results for this test" });
+    }
 
     const test = detail.test_id;
     const order = detail.order_id;
@@ -176,58 +187,229 @@ exports.uploadResult = async (req, res) => {
 
 
 
-exports.reportIssue = async (req, res) => {
+exports.reportInventoryIssue = async (req, res) => {
   try {
-    const staff_id = req.user.id; // Use authenticated staff
-    const { issue_type, related_id, message } = req.body;
+    const staff_id = req.user.id;
+    const { inventory_id, issue_type, quantity, description } = req.body;
 
-    if (!["device", "reagent"].includes(issue_type)) {
-      return res.status(400).json({ message: "Invalid issue type. Must be 'device' or 'reagent'." });
+    // Validation
+    if (!inventory_id || !issue_type || !quantity || quantity <= 0) {
+      return res.status(400).json({
+        message: "inventory_id, issue_type, and quantity (positive number) are required"
+      });
+    }
+
+    if (!["damaged", "expired", "contaminated", "missing", "other"].includes(issue_type)) {
+      return res.status(400).json({
+        message: "Invalid issue_type. Must be: damaged, expired, contaminated, missing, or other"
+      });
     }
 
     // Get staff to find owner_id
     const staff = await Staff.findById(staff_id);
     if (!staff) return res.status(404).json({ message: "Staff not found" });
 
-    // Fetch more info for context
-    let title = "Issue Reported";
-    let description = "";
+    // Get inventory item
+    const item = await Inventory.findById(inventory_id);
+    if (!item) return res.status(404).json({ message: "Inventory item not found" });
 
-    if (issue_type === "device") {
-      const device = await Device.findById(related_id);
-      if (!device) return res.status(404).json({ message: "Device not found" });
-      description = `Device Issue: ${device.name} (SN: ${device.serial_number})`;
-    } else if (issue_type === "reagent") {
-      const reagent = await Inventory.findById(related_id);
-      if (!reagent) return res.status(404).json({ message: "Reagent not found" });
-      description = `Reagent Issue: ${reagent.name}, Batch Code: ${reagent.item_code}`;
+    // Check ownership
+    if (item.owner_id.toString() !== staff.owner_id.toString()) {
+      return res.status(403).json({ message: "Cannot report issues for inventory from another lab" });
     }
 
-    // ✅ Create notification for lab owner
-    await Notification.create({
-      sender_id: staff_id,
-      sender_model: "Staff",
-      receiver_id: staff.owner_id,
-      receiver_model: "Owner",
-      type: "maintenance",
-      title,
-      message: `${description}\nDetails: ${message}`,
-      related_id,
-      created_at: new Date()
+    // Check if there's enough stock to report loss
+    if (item.current_stock < quantity) {
+      return res.status(400).json({
+        message: `Cannot report loss of ${quantity} items. Only ${item.current_stock} available in stock.`
+      });
+    }
+
+    // Record the loss in StockOutput
+    await StockOutput.create({
+      item_id: inventory_id,
+      output_value: quantity,
+      out_date: new Date(),
+      reason: issue_type,
+      staff_id: staff_id
     });
 
-    // Optional: add audit log
-    // await AuditLog.create({
-    //   staff_id,
-    //   action: `Reported ${issue_type} issue`,
-    //   table_name: issue_type === "device" ? "Device" : "Inventory",
-    //   record_id: related_id,
-    //   owner_id: <owner_id_from_device_or_staff>
-    // });
+    // Update inventory count
+    item.current_stock -= quantity;
+    await item.save();
 
-    res.status(201).json({ message: `${issue_type} issue reported successfully` });
+    // Create notification for lab owner
+    const issueMessages = {
+      damaged: `Damaged inventory: ${quantity} x ${item.name}`,
+      expired: `Expired inventory: ${quantity} x ${item.name}`,
+      contaminated: `Contaminated inventory: ${quantity} x ${item.name}`,
+      missing: `Missing inventory: ${quantity} x ${item.name}`,
+      other: `Inventory issue: ${quantity} x ${item.name}`
+    };
+
+    await Notification.create({
+      sender_id: staff_id,
+      sender_model: 'Staff',
+      receiver_id: staff.owner_id,
+      receiver_model: 'Owner',
+      type: 'inventory',
+      title: 'Inventory Issue Reported',
+      message: `${issueMessages[issue_type]}\nReported by: ${staff.full_name.first} ${staff.full_name.last}\nDetails: ${description || 'No additional details provided'}\nRemaining stock: ${item.current_stock}`,
+      related_id: inventory_id
+    });
+
+    // Log action
+    await logAction(
+      staff_id,
+      staff.username,
+      `Reported ${issue_type} inventory issue: ${quantity} x ${item.name}`,
+      'Inventory',
+      inventory_id,
+      staff.owner_id
+    );
+
+    res.json({
+      success: true,
+      message: "Inventory issue reported successfully",
+      item: {
+        _id: item._id,
+        name: item.name,
+        remaining_stock: item.current_stock,
+        quantity_reported: quantity,
+        issue_type
+      }
+    });
+
   } catch (err) {
-    console.error("Error reporting issue:", err);
+    console.error("Error reporting inventory issue:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Manually consume inventory items
+ * @route   POST /api/staff/consume-inventory
+ * @access  Private (Staff)
+ */
+exports.consumeInventory = async (req, res) => {
+  try {
+    const staff_id = req.user.id;
+    const { inventory_id, quantity, reason } = req.body;
+
+    // Validation
+    if (!inventory_id || !quantity || quantity <= 0) {
+      return res.status(400).json({
+        message: "inventory_id and quantity (positive number) are required"
+      });
+    }
+
+    // Get staff to find owner_id
+    const staff = await Staff.findById(staff_id);
+    if (!staff) return res.status(404).json({ message: "Staff not found" });
+
+    // Get inventory item
+    const item = await Inventory.findById(inventory_id);
+    if (!item) return res.status(404).json({ message: "Inventory item not found" });
+
+    // Check ownership
+    if (item.owner_id.toString() !== staff.owner_id.toString()) {
+      return res.status(403).json({ message: "Cannot consume inventory from another lab" });
+    }
+
+    // Check if there's enough stock
+    if (item.current_stock < quantity) {
+      return res.status(400).json({
+        message: `Cannot consume ${quantity} items. Only ${item.current_stock} available in stock.`
+      });
+    }
+
+    // Record the consumption in StockOutput
+    await StockOutput.create({
+      item_id: inventory_id,
+      output_value: quantity,
+      out_date: new Date(),
+      reason: reason || 'manual_consumption',
+      staff_id: staff_id
+    });
+
+    // Update inventory count
+    item.current_stock -= quantity;
+    await item.save();
+
+    // Log action
+    await logAction(
+      staff_id,
+      staff.username,
+      `Consumed ${quantity} x ${item.name} (${reason || 'manual consumption'})`,
+      'Inventory',
+      inventory_id,
+      staff.owner_id
+    );
+
+    res.json({
+      success: true,
+      message: "Inventory consumed successfully",
+      item: {
+        _id: item._id,
+        name: item.name,
+        remaining_stock: item.current_stock,
+        quantity_consumed: quantity,
+        reason: reason || 'manual_consumption'
+      }
+    });
+
+  } catch (err) {
+    console.error("Error consuming inventory:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.getInventoryItems = async (req, res) => {
+  try {
+    const staff_id = req.user.id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    // Get staff to find their lab
+    const staff = await Staff.findById(staff_id);
+    if (!staff) return res.status(404).json({ message: "Staff not found" });
+
+    // Get total count for pagination
+    const totalItems = await Inventory.countDocuments({ owner_id: staff.owner_id });
+
+    // Get paginated inventory items - select actual fields from model
+    const inventory = await Inventory.find({ owner_id: staff.owner_id })
+      .select('name count critical_level item_code expiration_date')
+      .sort({ name: 1 })
+      .skip(skip)
+      .limit(limit);
+
+    const totalPages = Math.ceil(totalItems / limit);
+    const hasMore = page < totalPages;
+
+    res.json({
+      success: true,
+      data: inventory.map(item => ({
+        _id: item._id,
+        name: item.name,
+        current_stock: item.count || 0,  // Map count to current_stock
+        unit: 'units',  // Default unit since not in model
+        min_threshold: item.critical_level || 0,  // Map critical_level to min_threshold
+        item_code: item.item_code,
+        expiration_date: item.expiration_date
+      })),
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalItems,
+        itemsPerPage: limit,
+        hasMore
+      }
+    });
+
+  } catch (err) {
+    console.error("Error fetching inventory items:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -252,11 +434,12 @@ exports.getAssignedTests = async (req, res) => {
 // ✅ Collect Sample from Patient
 exports.collectSample = async (req, res) => {
   try {
-    const { detail_id, staff_id, notes } = req.body;
+    const staff_id = req.user.id; // Use authenticated staff ID
+    const { detail_id, notes } = req.body;
 
-    if (!detail_id || !staff_id) {
+    if (!detail_id) {
       return res.status(400).json({ 
-        message: "⚠️ Detail ID and Staff ID are required" 
+        message: "⚠️ Detail ID is required" 
       });
     }
 
@@ -273,6 +456,11 @@ exports.collectSample = async (req, res) => {
 
     if (!detail) {
       return res.status(404).json({ message: "❌ Order detail not found" });
+    }
+
+    // Check if the test is assigned to this staff
+    if (!detail.staff_id || detail.staff_id.toString() !== staff_id.toString()) {
+      return res.status(403).json({ message: "You are not authorized to collect samples for this test" });
     }
 
     if (detail.sample_collected) {
@@ -319,14 +507,18 @@ exports.collectSample = async (req, res) => {
       }
     }
 
-    // Generate barcode if order doesn't have one yet
-    if (!detail.order_id.barcode) {
-      const barcode = await Order.generateUniqueBarcode();
-      await Order.findByIdAndUpdate(detail.order_id._id, {
-        barcode,
-        status: 'processing'
-      });
-      detail.order_id.barcode = barcode;
+    // Assign order barcode to sample if not already exists
+    if (!detail.barcode) {
+      if (detail.order_id.barcode) {
+        detail.barcode = detail.order_id.barcode;
+      } else {
+        // Generate barcode for order if it doesn't have one
+        const Order = require('../models/Order');
+        const orderBarcode = await Order.generateUniqueBarcode();
+        detail.order_id.barcode = orderBarcode;
+        await detail.order_id.save();
+        detail.barcode = orderBarcode;
+      }
     }
 
     // Update sample collection
@@ -338,9 +530,13 @@ exports.collectSample = async (req, res) => {
 
     await detail.save();
 
+    // Get staff username for logging
+    const loggingStaff = await Staff.findById(staff_id).select('username');
+
     // Log action
     await logAction(
       staff_id, 
+      loggingStaff.username,
       `Collected ${detail.test_id.sample_type} sample for test ${detail.test_id.test_name}`,
       'OrderDetails',
       detail_id
@@ -372,7 +568,7 @@ exports.collectSample = async (req, res) => {
         sample_collected: detail.sample_collected,
         sample_collected_date: detail.sample_collected_date,
         status: detail.status,
-        barcode: detail.order_id.barcode,
+        barcode: detail.barcode,
         assigned_staff: assignedStaff ? {
           staff_id: assignedStaff._id,
           name: `${assignedStaff.full_name.first} ${assignedStaff.full_name.last}`,
@@ -415,6 +611,17 @@ exports.updateSampleStatus = async (req, res) => {
     const normalizedStatus = status.toLowerCase();
     const oldStatus = detail.status;
     
+    // Prevent manual completion without result
+    if (normalizedStatus === 'completed') {
+      const Result = require('../models/Result');
+      const result = await Result.findOne({ detail_id });
+      if (!result) {
+        return res.status(400).json({ 
+          message: "⚠️ Cannot mark as completed without uploading result first. Please upload the test result." 
+        });
+      }
+    }
+    
     detail.status = normalizedStatus;
     
     // Auto-mark sample as collected if status is collected or beyond
@@ -425,8 +632,12 @@ exports.updateSampleStatus = async (req, res) => {
 
     await detail.save();
     
+    // Get staff username for logging
+    const loggingStaff = await Staff.findById(detail.staff_id).select('username');
+    
     await logAction(
       detail.staff_id, 
+      loggingStaff.username,
       `Updated test status from '${oldStatus}' to '${normalizedStatus}' for ${detail.test_id.test_name}`,
       'OrderDetails',
       detail_id
@@ -456,9 +667,19 @@ exports.updateSampleStatus = async (req, res) => {
 exports.getStaffDevices = async (req, res) => {
   try {
     const { staff_id } = req.params;
-    const devices = await Device.find({ assigned_to: staff_id });
+
+    // Verify requesting staff can access this
+    if (req.user.id !== staff_id && req.user.role !== 'Owner') {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const devices = await Device.find({ staff_id })
+      .populate('assigned_tests', 'test_name')
+      .sort({ name: 1 });
+
     res.json(devices);
   } catch (err) {
+    console.error("Error fetching staff devices:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -527,7 +748,7 @@ exports.getStaffDashboard = async (req, res) => {
       })
       .sort({ 
         status: 1,        // "urgent" comes before "pending" alphabetically
-        created_at: -1    // Then by newest first
+        createdAt: -1    // Then by newest first
       })
       .limit(20);
 
@@ -596,6 +817,106 @@ exports.getStaffDashboard = async (req, res) => {
 // ===============================
 // 📋 Pending Order Management
 // ===============================
+
+/**
+ * @desc    Get all orders for the lab (all statuses)
+ * @route   GET /api/staff/orders
+ * @access  Private (Staff)
+ */
+exports.getAllLabOrders = async (req, res) => {
+  try {
+    const staff_id = req.user.id;
+
+    // Get staff to find their lab (owner_id)
+    const staff = await Staff.findById(staff_id);
+    if (!staff) {
+      return res.status(404).json({ message: "Staff not found" });
+    }
+
+    // Query parameters for filtering
+    const { status, patient_id, startDate, endDate } = req.query;
+    
+    // Build query
+    const query = { owner_id: staff.owner_id };
+    
+    if (status) {
+      query.status = status;
+    }
+    
+    if (patient_id) {
+      query.patient_id = patient_id;
+    }
+    
+    if (startDate || endDate) {
+      query.order_date = {};
+      if (startDate) query.order_date.$gte = new Date(startDate);
+      if (endDate) query.order_date.$lte = new Date(endDate);
+    }
+
+    // Get all orders for this lab
+    const orders = await Order.find(query)
+      .populate('patient_id', 'full_name identity_number phone_number email')
+      .sort({ order_date: -1 });
+
+    // Get order details for each order
+    const ordersWithDetails = await Promise.all(
+      orders.map(async (order) => {
+        const details = await OrderDetails.find({ order_id: order._id })
+          .populate('test_id', 'test_name test_code price category');
+        
+        const totalCost = details.reduce((sum, detail) => {
+          return sum + (detail.test_id?.price || 0);
+        }, 0);
+
+        // Count completed and pending tests
+        const completedTests = details.filter(d => d.status === 'completed').length;
+        const pendingTests = details.filter(d => d.status === 'pending').length;
+
+        return {
+          order_id: order._id,
+          barcode: order.barcode,
+          patient_info: order.is_patient_registered 
+            ? {
+                full_name: order.patient_id?.full_name,
+                identity_number: order.patient_id?.identity_number,
+                phone_number: order.patient_id?.phone_number,
+                email: order.patient_id?.email,
+              }
+            : order.temp_patient_info,
+          patient_id: order.patient_id?._id,
+          is_patient_registered: order.is_patient_registered,
+          order_date: order.order_date,
+          status: order.status,
+          remarks: order.remarks,
+          is_urgent: order.remarks === 'urgent',
+          tests: details.map(d => ({
+            test_id: d.test_id?._id,
+            test_name: d.test_id?.test_name,
+            test_code: d.test_id?.test_code,
+            price: d.test_id?.price,
+            category: d.test_id?.category,
+            status: d.status,
+            is_urgent: d.status === 'urgent'
+          })),
+          total_cost: totalCost,
+          tests_count: details.length,
+          completed_tests: completedTests,
+          pending_tests: pendingTests
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      count: ordersWithDetails.length,
+      orders: ordersWithDetails
+    });
+
+  } catch (err) {
+    console.error("Error fetching lab orders:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
 
 /**
  * @desc    Get all pending orders (submitted but patient not registered)
@@ -711,6 +1032,17 @@ exports.registerPatientFromOrder = async (req, res) => {
       const username = order.temp_patient_info.email.split("@")[0];
       tempPassword = Math.random().toString(36).slice(-8);
 
+      // Convert address to proper format if it's a string
+      let addressData = order.temp_patient_info.address;
+      if (typeof addressData === 'string') {
+        const addressParts = addressData.split(',').map(part => part.trim());
+        addressData = {
+          street: '',
+          city: addressParts[0] || '',
+          country: addressParts[1] || 'Palestine'
+        };
+      }
+
       patient = await Patient.create({
         full_name: order.temp_patient_info.full_name,
         identity_number: order.temp_patient_info.identity_number,
@@ -718,7 +1050,7 @@ exports.registerPatientFromOrder = async (req, res) => {
         gender: order.temp_patient_info.gender,
         phone_number: order.temp_patient_info.phone_number,
         email: order.temp_patient_info.email,
-        address: order.temp_patient_info.address,
+        address: addressData,
         patient_id: `PAT-${Date.now()}`,
         username,
         password: tempPassword,
@@ -806,8 +1138,10 @@ exports.registerPatientFromOrder = async (req, res) => {
     });
 
     // Log action
+    const loggingStaff = await Staff.findById(staff_id).select('username');
     await logAction(
       staff_id,
+      loggingStaff.username,
       isNewPatient 
         ? `Registered new patient ${patient.patient_id} from order ${order.barcode}`
         : `Linked existing patient ${patient.patient_id} to order ${order.barcode}`,
@@ -868,7 +1202,7 @@ exports.getUnassignedTests = async (req, res) => {
     .populate('test_id', 'test_name test_code method sample_type')
     .sort({ 
       status: 1,        // "urgent" before "pending" alphabetically
-      created_at: -1    // Then by newest first
+      createdAt: -1    // Then by newest first
     })
     .lean();
 
@@ -968,8 +1302,11 @@ exports.assignStaffToTest = async (req, res) => {
     }
 
     // Log action
+    const LabOwner = require('../models/Owner');
+    const loggingOwner = await LabOwner.findById(req.user.id).select('username');
     await logAction(
       req.user.id,
+      loggingOwner.username,
       previousStaffId 
         ? `Reassigned test ${detail.test_id.test_name} from staff ${previousStaffId} to ${staff_id}`
         : `Assigned test ${detail.test_id.test_name} to staff ${staff_id}`,
@@ -1093,10 +1430,115 @@ exports.markTestCompleted = async (req, res) => {
 };
 
 /**
- * @desc    Get all tests assigned to the logged-in staff member
- * @route   GET /api/staff/my-assigned-tests
- * @access  Staff
+ * @desc    Generate barcode for a sample/test (can be called before sample collection)
+ * @route   POST /api/staff/generate-sample-barcode/:detail_id
+ * @access  Private (Staff)
  */
+exports.generateSampleBarcode = async (req, res) => {
+  try {
+    const { detail_id } = req.params;
+    const { frontend_barcode } = req.body;
+    const staff_id = req.user.id;
+
+    const OrderDetails = require('../models/OrderDetails');
+
+    const detail = await OrderDetails.findById(detail_id).populate('order_id');
+    if (!detail) {
+      return res.status(404).json({ message: "Order detail not found" });
+    }
+
+    // Check if staff has access to this test
+    if (detail.staff_id && detail.staff_id.toString() !== staff_id) {
+      return res.status(403).json({ message: "Access denied - test not assigned to you" });
+    }
+
+    let barcode;
+
+    if (frontend_barcode) {
+      // Use frontend-generated barcode
+      try {
+        barcode = await OrderDetails.validateAndSetSampleBarcode(detail_id, frontend_barcode);
+      } catch (error) {
+        return res.status(400).json({ message: error.message });
+      }
+    } else {
+      // Generate barcode on backend
+      if (detail.barcode) {
+        return res.status(400).json({ message: "Sample already has a barcode" });
+      }
+      barcode = await OrderDetails.generateUniqueSampleBarcode();
+      await OrderDetails.findByIdAndUpdate(detail_id, { barcode });
+    }
+
+    // Update order status to processing if not already
+    if (detail.order_id.status === 'pending') {
+      await require('../models/Order').findByIdAndUpdate(detail.order_id._id, { status: 'processing' });
+    }
+
+    res.json({
+      success: true,
+      message: "Sample barcode generated successfully",
+      barcode: barcode,
+      detail_id: detail_id,
+      order_id: detail.order_id._id
+    });
+
+  } catch (err) {
+    console.error("Error generating sample barcode:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Generate barcode for an order (can be called before sample collection)
+ * @route   POST /api/staff/generate-barcode/:order_id
+ * @access  Private (Staff)
+ */
+exports.generateBarcode = async (req, res) => {
+  try {
+    const { order_id } = req.params;
+    const { frontend_barcode } = req.body;
+
+    const order = await Order.findById(order_id);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    let barcode;
+
+    if (frontend_barcode) {
+      // Use frontend-generated barcode
+      try {
+        barcode = await Order.validateAndSetBarcode(order_id, frontend_barcode);
+      } catch (error) {
+        return res.status(400).json({ message: error.message });
+      }
+    } else {
+      // Generate barcode on backend
+      if (order.barcode) {
+        return res.status(400).json({ message: "Order already has a barcode" });
+      }
+      barcode = await Order.generateUniqueBarcode();
+      await Order.findByIdAndUpdate(order_id, { barcode });
+    }
+
+    // Update order status to processing if not already
+    if (order.status === 'pending') {
+      await Order.findByIdAndUpdate(order_id, { status: 'processing' });
+    }
+
+    res.json({
+      success: true,
+      message: "Barcode generated successfully",
+      barcode: barcode,
+      order_id: order_id
+    });
+
+  } catch (err) {
+    console.error("Error generating barcode:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
 exports.getMyAssignedTests = async (req, res) => {
   try {
     const staff_id = req.user.id;
@@ -1130,7 +1572,7 @@ exports.getMyAssignedTests = async (req, res) => {
         }
       })
       .populate('device_id', 'name serial_number status')
-      .populate('collected_by', 'full_name employee_number')
+      .populate('staff_id', 'full_name employee_number')
       .sort({ 
         status: 1,
         assigned_at: -1
@@ -1345,8 +1787,10 @@ exports.autoAssignTests = async (req, res) => {
     }
 
     // Log action
+    const loggingStaff = await Staff.findById(staff_id).select('username');
     await logAction(
       staff_id,
+      loggingStaff.username,
       `Auto-assigned ${assignments.filter(a => a.status === 'assigned').length} tests for order ${order_id}`,
       'Order',
       order_id
@@ -1369,3 +1813,292 @@ exports.autoAssignTests = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+// ==================== FEEDBACK ====================
+
+/**
+ * @desc    Provide Feedback on Lab, Test, or Order
+ * @route   POST /api/staff/feedback
+ * @access  Private (Staff)
+ */
+exports.provideFeedback = async (req, res) => {
+  try {
+    const staff_id = req.user.id;
+    const { target_type, target_id, rating, message, is_anonymous } = req.body;
+
+    // Validate required fields
+    if (!target_type || !rating) {
+      return res.status(400).json({ message: '⚠️ Target type and rating are required' });
+    }
+
+    // Validate target_type
+    const validTargetTypes = ['lab', 'test', 'order', 'system'];
+    if (!validTargetTypes.includes(target_type)) {
+      return res.status(400).json({ message: '⚠️ Invalid target type. Must be lab, test, order, or system' });
+    }
+
+    // For non-system feedback, target_id is required
+    if (target_type !== 'system' && !target_id) {
+      return res.status(400).json({ message: '⚠️ Target ID is required for non-system feedback' });
+    }
+
+    // Validate rating (1-5)
+    if (rating < 1 || rating > 5) {
+      return res.status(400).json({ message: '⚠️ Rating must be between 1 and 5' });
+    }
+
+    // Get staff to find their lab
+    const staff = await Staff.findById(staff_id);
+    if (!staff) {
+      return res.status(404).json({ message: 'Staff not found' });
+    }
+
+    // Validate target exists and staff has access (skip for system feedback)
+    let targetExists = target_type === 'system';
+    let targetOwnerId = null;
+
+    if (target_type !== 'system') {
+      switch (target_type) {
+        case 'lab':
+          const Owner = require('../models/Owner');
+          const lab = await Owner.findById(target_id);
+          if (lab && lab._id.toString() === staff.owner_id.toString()) {
+            targetExists = true;
+            targetOwnerId = lab._id;
+          }
+          break;
+        case 'test':
+          const test = await Test.findById(target_id);
+          if (test && test.owner_id.toString() === staff.owner_id.toString()) {
+            targetExists = true;
+            targetOwnerId = test.owner_id;
+          }
+          break;
+        case 'order':
+          const order = await Order.findOne({
+            _id: target_id,
+            owner_id: staff.owner_id
+          });
+          if (order) {
+            targetExists = true;
+            targetOwnerId = order.owner_id;
+          }
+          break;
+      }
+
+      if (!targetExists) {
+        return res.status(404).json({ message: '❌ Target not found or access denied' });
+      }
+    }
+
+    // Create feedback
+    const feedback = new Feedback({
+      user_id: staff_id,
+      user_model: 'Staff',
+      target_type,
+      target_id: target_type === 'system' ? null : target_id,
+      rating,
+      message: message || '',
+      is_anonymous: is_anonymous || false
+    });
+
+    await feedback.save();
+
+    // Send notification to lab owner (skip for system feedback)
+    if (targetOwnerId) {
+      await Notification.create({
+        sender_id: staff_id,
+        sender_model: 'Staff',
+        receiver_id: targetOwnerId,
+        receiver_model: 'Owner',
+        type: 'feedback',
+        title: '⭐ New Feedback Received',
+        message: `Staff member ${staff.full_name.first} ${staff.full_name.last} provided ${rating}-star feedback on your ${target_type}`
+      });
+    }
+
+    res.status(201).json({
+      message: '✅ Feedback submitted successfully',
+      feedback: {
+        _id: feedback._id,
+        rating: feedback.rating,
+        message: feedback.message,
+        is_anonymous: feedback.is_anonymous,
+        createdAt: feedback.createdAt
+      }
+    });
+  } catch (err) {
+    console.error("Error providing feedback:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Get My Feedback History
+ * @route   GET /api/staff/feedback
+ * @access  Private (Staff)
+ */
+exports.getMyFeedback = async (req, res) => {
+  try {
+    const staff_id = req.user.id;
+    const { page = 1, limit = 10, target_type } = req.query;
+
+    const query = {
+      user_id: staff_id,
+      user_model: 'Staff'
+    };
+
+    if (target_type) {
+      query.target_type = target_type;
+    }
+
+    const feedback = await Feedback.find(query)
+      .populate({
+        path: 'target_id',
+        select: 'name lab_name test_name barcode',
+        model: function(doc) {
+          switch (doc.target_type) {
+            case 'lab': return 'Owner';
+            case 'test': return 'Test';
+            case 'order': return 'Order';
+            case 'system': return null; // System feedback has no specific target
+            default: return null;
+          }
+        }
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Feedback.countDocuments(query);
+
+    res.json({
+      success: true,
+      feedbacks: feedback,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (err) {
+    console.error("Error fetching feedback:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ==================== MISSING FUNCTIONS ====================
+
+/**
+ * @desc    Report an issue with a device
+ * @route   POST /api/staff/report-issue
+ * @access  Private (Staff)
+ */
+exports.reportIssue = async (req, res) => {
+  try {
+    const staff_id = req.user.id;
+    const { device_id, issue_description } = req.body;
+
+    if (!device_id || !issue_description) {
+      return res.status(400).json({ message: "Device ID and issue description are required" });
+    }
+
+    // Verify device exists and belongs to staff's lab
+    const device = await Device.findById(device_id);
+    if (!device) {
+      return res.status(404).json({ message: "Device not found" });
+    }
+
+    const staff = await Staff.findById(staff_id);
+    if (device.owner_id.toString() !== staff.owner_id.toString()) {
+      return res.status(403).json({ message: "Cannot report issue for device from another lab" });
+    }
+
+    // Create notification for lab owner
+    await Notification.create({
+      sender_id: staff_id,
+      sender_model: 'Staff',
+      receiver_id: staff.owner_id,
+      receiver_model: 'Owner',
+      type: 'issue',
+      title: 'Device Issue Reported',
+      message: `Staff reported issue with device ${device.name}: ${issue_description}`
+    });
+
+    res.json({ message: "Issue reported successfully" });
+  } catch (err) {
+    console.error("Error reporting issue:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Get devices assigned to staff
+ * @route   GET /api/staff/devices/:staff_id
+ * @access  Private (Staff)
+ */
+exports.getStaffDevices = async (req, res) => {
+  try {
+    const { staff_id } = req.params;
+
+    // Verify requesting staff can access this
+    if (req.user.id !== staff_id && req.user.role !== 'Owner') {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const devices = await Device.find({ staff_id })
+      .populate('assigned_tests', 'test_name')
+      .sort({ name: 1 });
+
+    res.json(devices);
+  } catch (err) {
+    console.error("Error fetching staff devices:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Report an inventory issue
+ * @route   POST /api/staff/report-inventory-issue
+ * @access  Private (Staff)
+ */
+exports.reportInventoryIssue = async (req, res) => {
+  try {
+    const staff_id = req.user.id;
+    const { item_id, issue_description } = req.body;
+
+    if (!item_id || !issue_description) {
+      return res.status(400).json({ message: "Item ID and issue description are required" });
+    }
+
+    // Verify item exists and belongs to staff's lab
+    const item = await Inventory.findById(item_id);
+    if (!item) {
+      return res.status(404).json({ message: "Inventory item not found" });
+    }
+
+    const staff = await Staff.findById(staff_id);
+    if (item.owner_id.toString() !== staff.owner_id.toString()) {
+      return res.status(403).json({ message: "Cannot report issue for item from another lab" });
+    }
+
+    // Create notification for lab owner
+    await Notification.create({
+      sender_id: staff_id,
+      sender_model: 'Staff',
+      receiver_id: staff.owner_id,
+      receiver_model: 'Owner',
+      type: 'issue',
+      title: 'Inventory Issue Reported',
+      message: `Staff reported issue with inventory item ${item.name}: ${issue_description}`
+    });
+
+    res.json({ message: "Inventory issue reported successfully" });
+  } catch (err) {
+    console.error("Error reporting inventory issue:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+module.exports = exports;

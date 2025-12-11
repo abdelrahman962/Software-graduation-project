@@ -3,7 +3,12 @@ const OrderDetails = require("../models/OrderDetails");
 const Test = require("../models/Test");
 const LabOwner = require("../models/Owner");
 const Notification = require("../models/Notification");
-const LabBranch = require("../models/LabBranch");
+const Feedback = require("../models/Feedback");
+const Patient = require("../models/Patient");
+const Doctor = require("../models/Doctor");
+const Staff = require("../models/Staff");
+const Admin = require("../models/Admin");
+const jwt = require('jsonwebtoken');
 const sendEmail = require("../utils/sendEmail");
 const sendSMS = require("../utils/sendSMS");
 
@@ -272,205 +277,6 @@ exports.getLabTests = async (req, res) => {
 };
 
 // ============================================================================
-// LAB BRANCH SEARCH ENDPOINTS
-// ============================================================================
-
-/**
- * @desc    Get all available lab branches with pagination and filters
- * @route   GET /api/public/branches/all
- * @access  Public
- */
-exports.getAllAvailableBranches = async (req, res) => {
-  try {
-    const { page = 1, limit = 20, city, state, services, search } = req.query;
-    
-    let query = { is_active: true };
-    
-    // Filter by city
-    if (city) {
-      query['location.city'] = new RegExp(city, 'i');
-    }
-    
-    // Filter by state
-    if (state) {
-      query['location.state'] = new RegExp(state, 'i');
-    }
-    
-    // Filter by services offered
-    if (services) {
-      query.services_offered = { 
-        $in: services.split(',').map(s => s.trim()) 
-      };
-    }
-    
-    // Search by branch name or location
-    if (search) {
-      query.$or = [
-        { branch_name: new RegExp(search, 'i') },
-        { 'location.city': new RegExp(search, 'i') },
-        { 'location.street': new RegExp(search, 'i') }
-      ];
-    }
-
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    const branches = await LabBranch.find(query)
-      .populate('owner_id', 'name phone_number email is_active status')
-      .skip(skip)
-      .limit(parseInt(limit))
-      .sort({ created_at: -1 });
-
-    // Filter to only show branches with active, approved owners
-    const activeBranches = branches.filter(
-      b => b.owner_id?.is_active && b.owner_id?.status === 'approved'
-    );
-    
-    // Get total count for pagination
-    const totalCount = await LabBranch.countDocuments(query);
-
-    res.json({ 
-      success: true,
-      branches: activeBranches, 
-      count: activeBranches.length,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: totalCount,
-        pages: Math.ceil(totalCount / parseInt(limit))
-      }
-    });
-  } catch (err) {
-    console.error("Error fetching branches:", err);
-    res.status(500).json({ error: err.message });
-  }
-};
-
-/**
- * @desc    Find nearest lab branches based on GPS coordinates
- * @route   GET /api/public/branches/nearest
- * @access  Public
- */
-exports.findNearestBranches = async (req, res) => {
-  try {
-    const { latitude, longitude, maxDistance = 50, limit = 10 } = req.query;
-
-    if (!latitude || !longitude) {
-      return res.status(400).json({ 
-        message: 'Latitude and longitude are required' 
-      });
-    }
-
-    const lat = parseFloat(latitude);
-    const lon = parseFloat(longitude);
-
-    // Find branches using MongoDB geospatial query
-    const branches = await LabBranch.aggregate([
-      {
-        $geoNear: {
-          near: {
-            type: 'Point',
-            coordinates: [lon, lat]
-          },
-          distanceField: 'distance',
-          maxDistance: parseFloat(maxDistance) * 1000, // Convert km to meters
-          spherical: true,
-          query: { is_active: true }
-        }
-      },
-      {
-        $limit: parseInt(limit)
-      },
-      {
-        $lookup: {
-          from: 'labowners',
-          localField: 'owner_id',
-          foreignField: '_id',
-          as: 'owner'
-        }
-      },
-      {
-        $unwind: '$owner'
-      },
-      {
-        $match: {
-          'owner.is_active': true,
-          'owner.status': 'approved'
-        }
-      },
-      {
-        $project: {
-          branch_name: 1,
-          branch_code: 1,
-          location: 1,
-          contact: 1,
-          operating_hours: 1,
-          services_offered: 1,
-          distance: { $divide: ['$distance', 1000] }, // Convert to km
-          'owner.name': 1,
-          'owner.phone_number': 1,
-          'owner.email': 1
-        }
-      }
-    ]);
-
-    res.json({ 
-      success: true,
-      branches, 
-      count: branches.length,
-      searchLocation: { latitude: lat, longitude: lon }
-    });
-  } catch (err) {
-    console.error("Error finding nearest branches:", err);
-    res.status(500).json({ error: err.message });
-  }
-};
-
-/**
- * @desc    Search branches by city, state, or services
- * @route   GET /api/public/branches/search
- * @access  Public
- */
-exports.searchBranches = async (req, res) => {
-  try {
-    const { city, state, services } = req.query;
-    
-    let query = { is_active: true };
-    
-    if (city) {
-      query['location.city'] = new RegExp(city, 'i');
-    }
-    
-    if (state) {
-      query['location.state'] = new RegExp(state, 'i');
-    }
-    
-    if (services) {
-      query.services_offered = { 
-        $in: services.split(',').map(s => s.trim()) 
-      };
-    }
-
-    const branches = await LabBranch.find(query)
-      .populate('owner_id', 'name phone_number email is_active status')
-      .limit(50);
-
-    // Filter to only show branches with active, approved owners
-    const activeBranches = branches.filter(
-      b => b.owner_id?.is_active && b.owner_id?.status === 'approved'
-    );
-
-    res.json({ 
-      success: true,
-      branches: activeBranches, 
-      count: activeBranches.length 
-    });
-  } catch (err) {
-    console.error("Error searching branches:", err);
-    res.status(500).json({ error: err.message });
-  }
-};
-
-// ============================================================================
 // ACCOUNT REGISTRATION ENDPOINTS
 // ============================================================================
 
@@ -653,5 +459,325 @@ MedLab System
   } catch (err) {
     console.error("Error completing registration:", err);
     res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Get system feedback for marketing pages
+ * @route   GET /api/public/feedback/system
+ * @access  Public
+ */
+exports.getSystemFeedback = async (req, res) => {
+  try {
+    const { limit = 20, minRating = 4, role } = req.query;
+
+    // Build query filter
+    const query = {
+      target_type: 'system',
+      rating: { $gte: parseInt(minRating) }
+    };
+
+    // Filter by role if specified
+    if (role && ['Patient', 'Staff', 'Owner', 'Doctor'].includes(role)) {
+      query.user_model = role;
+    }
+
+    const feedback = await Feedback.find(query)
+    .populate({
+      path: 'user_id',
+      select: 'full_name lab_name username'
+    })
+    .sort({ rating: -1, createdAt: -1 })
+    .limit(parseInt(limit))
+    .select('rating message user_id user_model is_anonymous createdAt')
+    .lean();
+
+    // Transform the data with proper user information
+    const transformedFeedback = feedback.map(item => {
+      let userName = 'Anonymous User';
+      
+      if (!item.is_anonymous && item.user_id) {
+        if (item.user_model === 'Owner' && item.user_id.lab_name) {
+          userName = item.user_id.lab_name;
+        } else if (item.user_id.full_name) {
+          userName = `${item.user_id.full_name.first} ${item.user_id.full_name.last}`;
+        } else if (item.user_id.username) {
+          userName = item.user_id.username;
+        }
+      }
+
+      return {
+        _id: item._id,
+        user_id: item.is_anonymous ? null : item.user_id?._id,
+        user_model: item.user_model,
+        user_role: item.user_model, // For frontend display
+        user_name: userName,
+        target_type: 'system',
+        target_id: null,
+        rating: item.rating,
+        message: item.message,
+        is_anonymous: item.is_anonymous,
+        createdAt: item.createdAt,
+        updatedAt: item.createdAt
+      };
+    });
+
+    // Group by role for statistics
+    const roleStats = feedback.reduce((acc, item) => {
+      acc[item.user_model] = (acc[item.user_model] || 0) + 1;
+      return acc;
+    }, {});
+
+    res.json({
+      success: true,
+      count: transformedFeedback.length,
+      feedback: transformedFeedback,
+      statistics: {
+        total: transformedFeedback.length,
+        by_role: roleStats,
+        average_rating: feedback.length > 0 
+          ? (feedback.reduce((sum, f) => sum + f.rating, 0) / feedback.length).toFixed(1)
+          : 0
+      }
+    });
+  } catch (err) {
+    console.error("Error fetching system feedback:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Submit contact form for laboratory owners interested in the system
+ * @route   POST /api/public/contact
+ * @access  Public
+ */
+exports.submitContactForm = async (req, res) => {
+  try {
+    const { name, email, phone, lab_name, message } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !lab_name || !message) {
+      return res.status(400).json({
+        message: "Name, email, laboratory name, and message are required"
+      });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: "Please provide a valid email address" });
+    }
+
+    // Create contact inquiry record (you might want to create a Contact model for this)
+    // For now, we'll just send an email notification to the admin
+
+    // Send email notification to admin
+    const adminEmailSubject = `New Contact Inquiry: ${lab_name}`;
+    const adminEmailBody = `
+      <h2>New Laboratory Contact Inquiry</h2>
+      <p><strong>Contact Person:</strong> ${name}</p>
+      <p><strong>Email:</strong> ${email}</p>
+      <p><strong>Phone:</strong> ${phone || 'Not provided'}</p>
+      <p><strong>Laboratory Name:</strong> ${lab_name}</p>
+      <p><strong>Message:</strong></p>
+      <p>${message.replace(/\n/g, '<br>')}</p>
+      <hr>
+      <p><em>This inquiry was submitted through the MedLab System contact form.</em></p>
+    `;
+
+    // Send email to admin (you'll need to configure admin email)
+    try {
+      await sendEmail(process.env.ADMIN_EMAIL || 'admin@medlabsystem.com', adminEmailSubject, adminEmailBody);
+    } catch (emailError) {
+      console.error('Failed to send admin notification email:', emailError);
+      // Don't fail the request if email fails, just log it
+    }
+
+    // Send confirmation email to the contact person
+    const confirmationSubject = 'Thank you for your interest in MedLab System';
+    const confirmationBody = `
+      <h2>Thank you for contacting us!</h2>
+      <p>Dear ${name},</p>
+      <p>Thank you for your interest in MedLab System. We have received your inquiry about implementing our laboratory management system for ${lab_name}.</p>
+      <p>Our team will review your message and contact you within 24-48 hours to discuss your specific needs and how we can help transform your laboratory operations.</p>
+      <p><strong>Your message:</strong></p>
+      <p>${message.replace(/\n/g, '<br>')}</p>
+      <br>
+      <p>Best regards,<br>The MedLab System Team</p>
+    `;
+
+    try {
+      await sendEmail(email, confirmationSubject, confirmationBody);
+    } catch (emailError) {
+      console.error('Failed to send confirmation email:', emailError);
+    }
+
+    res.status(200).json({
+      message: "Contact form submitted successfully. We will contact you soon!",
+      success: true
+    });
+
+  } catch (err) {
+    console.error("Error submitting contact form:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Unified Login - checks all user types in one request
+ * @route   POST /api/public/login
+ * @access  Public
+ */
+exports.unifiedLogin = async (req, res, next) => {
+  try {
+    const { username, password } = req.body;
+
+    // Validate input
+    if (!username || !password) {
+      return res.status(400).json({ message: '⚠️ Username and password are required' });
+    }
+
+    // Try each user type in order: Patient, Doctor, Staff, Owner, Admin
+    const userTypes = [
+      {
+        model: Patient,
+        role: 'patient',
+        route: '/patient-dashboard',
+        fields: {
+          _id: 1,
+          patient_id: 1,
+          full_name: 1,
+          identity_number: 1,
+          birthday: 1,
+          gender: 1,
+          insurance_provider: 1,
+          insurance_number: 1,
+          email: 1,
+          username: 1
+        }
+      },
+      {
+        model: Doctor,
+        role: 'doctor',
+        route: '/doctor-dashboard',
+        fields: {
+          _id: 1,
+          doctor_id: 1,
+          full_name: 1,
+          specialization: 1,
+          license_number: 1,
+          email: 1,
+          username: 1
+        }
+      },
+      {
+        model: Staff,
+        role: 'staff',
+        route: '/staff/dashboard',
+        fields: {
+          _id: 1,
+          full_name: 1,
+          employee_number: 1,
+          position: 1,
+          email: 1,
+          username: 1,
+          owner_id: 1
+        }
+      },
+      {
+        model: LabOwner,
+        role: 'owner',
+        route: '/owner/dashboard',
+        fields: {
+          _id: 1,
+          lab_name: 1,
+          owner_name: 1,
+          email: 1,
+          username: 1,
+          phone_number: 1,
+          license_number: 1,
+          status: 1
+        }
+      },
+      {
+        model: Admin,
+        role: 'admin',
+        route: '/admin/dashboard',
+        fields: {
+          _id: 1,
+          full_name: 1,
+          email: 1,
+          username: 1
+        }
+      }
+    ];
+
+    // Normalize username for staff (lowercase, spaces to dots)
+    const normalizedUsername = username.replace(/\s+/g, '.').toLowerCase();
+
+    for (const userType of userTypes) {
+      // For staff, use normalized username
+      const searchUsername = userType.role === 'staff' ? normalizedUsername : username;
+      
+      const user = await userType.model.findOne({
+        $or: [{ username: searchUsername }, { email: username }]
+      });
+
+      if (user) {
+        // Check password
+        const isMatch = await user.comparePassword(password);
+        if (isMatch) {
+          // Update last login if field exists
+          if (user.last_login !== undefined) {
+            user.last_login = new Date();
+            await user.save();
+          }
+
+          // Generate JWT token
+          const tokenPayload = {
+            _id: user._id,
+            role: userType.role,
+            username: user.username
+          };
+
+          // Add role-specific IDs
+          if (userType.role === 'patient' && user.patient_id) {
+            tokenPayload.patient_id = user.patient_id;
+          } else if (userType.role === 'doctor' && user.doctor_id) {
+            tokenPayload.doctor_id = user.doctor_id;
+          } else if (userType.role === 'staff' && user.owner_id) {
+            tokenPayload.owner_id = user.owner_id;
+          }
+
+          const token = jwt.sign(
+            tokenPayload,
+            process.env.JWT_SECRET,
+            { expiresIn: '7d' }
+          );
+
+          // Prepare user data (remove password and other sensitive fields)
+          const userData = {};
+          Object.keys(userType.fields).forEach(field => {
+            if (user[field] !== undefined) {
+              userData[field] = user[field];
+            }
+          });
+
+          return res.json({
+            message: '✅ Login successful',
+            token,
+            role: userType.role,
+            route: userType.route,
+            user: userData
+          });
+        }
+      }
+    }
+
+    // If we get here, no valid credentials were found
+    return res.status(401).json({ message: '❌ Invalid credentials' });
+
+  } catch (err) {
+    next(err);
   }
 };

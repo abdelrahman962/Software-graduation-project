@@ -72,11 +72,33 @@ router.get("/patients/search", doctorController.searchPatients);
 router.get("/patients", doctorController.getPatients);
 
 /**
+ * @route   GET /api/doctor/patient/:patient_id
+ * @desc    Get patient details
+ * @access  Private (Doctor)
+ */
+router.get("/patient/:patient_id", doctorController.getPatientDetails);
+
+/**
  * @route   GET /api/doctor/patient/:patient_id/history
  * @desc    View patient's complete test history
  * @access  Private (Doctor)
  */
 router.get("/patient/:patient_id/history", doctorController.getPatientTestHistory);
+
+// ==================== PATIENT REPORTS ====================
+/**
+ * @route   GET /api/doctor/patient-orders
+ * @desc    Get all patient orders with results summary (for doctor dashboard)
+ * @access  Private (Doctor)
+ */
+router.get("/patient-orders", doctorController.getPatientOrdersWithResults);
+
+/**
+ * @route   GET /api/doctor/order/:order_id/results
+ * @desc    Get detailed results for a specific order
+ * @access  Private (Doctor)
+ */
+router.get("/order/:order_id/results", doctorController.getOrderResults);
 
 // ==================== TEST ORDERING ====================
 /**
@@ -92,5 +114,20 @@ router.post("/request-test", ...doctorValidator.validateRequestTest, validateReq
  * @access  Private (Doctor)
  */
 router.post("/order/:order_id/urgent", ...doctorValidator.validateMarkUrgent, validateRequest, doctorController.markTestUrgent);
+
+// ==================== FEEDBACK ====================
+/**
+ * @route   POST /api/doctor/feedback
+ * @desc    Submit feedback on labs, tests, or services
+ * @access  Private (Doctor)
+ */
+router.post("/feedback", ...doctorValidator.validateFeedback, validateRequest, doctorController.provideFeedback);
+
+/**
+ * @route   GET /api/doctor/feedback
+ * @desc    Get doctor's feedback history
+ * @access  Private (Doctor)
+ */
+router.get("/feedback", doctorController.getMyFeedback);
 
 module.exports = router;

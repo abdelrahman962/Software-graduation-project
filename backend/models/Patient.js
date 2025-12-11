@@ -33,17 +33,29 @@ const patientSchema = new mongoose.Schema({
   },
   password: { type: String, required: true },
   created_by_staff: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' },
-  created_at: { type: Date, default: Date.now },
   last_login: Date
 }, {
   timestamps: true
 });
 
 // Normalize username before saving
-patientSchema.pre('save', function(next) {
+patientSchema.pre('save', async function(next) {
   if (this.isModified('username')) {
     // Remove spaces and convert to lowercase
     this.username = this.username.replace(/\s+/g, '.').toLowerCase();
+    
+    // Check uniqueness across all user collections
+    const existingUsers = await Promise.all([
+      mongoose.model('Doctor').findOne({ username: this.username }),
+      mongoose.model('Staff').findOne({ username: this.username }),
+      mongoose.model('Owner').findOne({ username: this.username }),
+      mongoose.model('Admin').findOne({ username: this.username }),
+      mongoose.model('Patient').findOne({ username: this.username, _id: { $ne: this._id } })
+    ]);
+    
+    if (existingUsers.some(user => user !== null)) {
+      return next(new Error('Username already exists across all user roles'));
+    }
   }
   next();
 });

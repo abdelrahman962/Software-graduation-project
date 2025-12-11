@@ -13,9 +13,10 @@ const testSchema = new mongoose.Schema({
   price: Number,
   owner_id: { type: mongoose.Schema.Types.ObjectId, ref: 'LabOwner', required: true },
   turnaround_time: String,
-  created_at: { type: Date, default: Date.now },
   collection_time: String,
   reagent: String
+}, {
+  timestamps: true
 });
 
 module.exports = mongoose.model('TestManagement', testSchema);

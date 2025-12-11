@@ -3,6 +3,8 @@ const router = express.Router();
 const ownerController = require('../controllers/ownerController');
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
+const ownerValidator = require('../validators/ownerValidator');
+const { validateRequest } = require('../middleware/validationMiddleware');
 // ==================== AUTHENTICATION ROUTES ====================
 
 /**
@@ -75,6 +77,43 @@ router.put('/staff/:staffId', authMiddleware, roleMiddleware(['owner']), ownerCo
  * @access  Private (Owner)
  */
 router.delete('/staff/:staffId', authMiddleware, roleMiddleware(['owner']), ownerController.deleteStaff);
+
+// ==================== DOCTOR MANAGEMENT ROUTES ====================
+
+/**
+ * @route   GET /api/owner/doctors
+ * @desc    Get all doctors
+ * @access  Private (Owner)
+ */
+router.get('/doctors', authMiddleware, roleMiddleware(['owner']), ownerController.getAllDoctors);
+
+/**
+ * @route   GET /api/owner/doctors/:doctorId
+ * @desc    Get single doctor
+ * @access  Private (Owner)
+ */
+router.get('/doctors/:doctorId', authMiddleware, roleMiddleware(['owner']), ownerController.getDoctorById);
+
+/**
+ * @route   POST /api/owner/doctors
+ * @desc    Add new doctor
+ * @access  Private (Owner)
+ */
+router.post('/doctors', authMiddleware, roleMiddleware(['owner']), ownerController.addDoctor);
+
+/**
+ * @route   PUT /api/owner/doctors/:doctorId
+ * @desc    Update doctor
+ * @access  Private (Owner)
+ */
+router.put('/doctors/:doctorId', authMiddleware, roleMiddleware(['owner']), ownerController.updateDoctor);
+
+/**
+ * @route   DELETE /api/owner/doctors/:doctorId
+ * @desc    Delete doctor
+ * @access  Private (Owner)
+ */
+router.delete('/doctors/:doctorId', authMiddleware, roleMiddleware(['owner']), ownerController.deleteDoctor);
 
 // ==================== DEVICE MANAGEMENT ROUTES ====================
 
@@ -194,6 +233,13 @@ router.put('/inventory/:itemId', authMiddleware, roleMiddleware(['owner']), owne
  */
 router.delete('/inventory/:itemId', authMiddleware, roleMiddleware(['owner']), ownerController.deleteInventoryItem);
 
+/**
+ * @route   POST /api/owner/inventory/input
+ * @desc    Add stock input to inventory item
+ * @access  Private (Owner)
+ */
+router.post('/inventory/input', authMiddleware, roleMiddleware(['owner']), ownerController.addStockInput);
+
 // ==================== ORDER MANAGEMENT ROUTES ====================
 
 /**
@@ -249,6 +295,27 @@ router.put('/notifications/:notificationId/read', authMiddleware, roleMiddleware
  */
 router.post('/notifications/send', authMiddleware, roleMiddleware(['owner']), ownerController.sendNotificationToStaff);
 
+/**
+ * @route   POST /api/owner/notifications/:notificationId/reply
+ * @desc    Reply to a notification
+ * @access  Private (Owner)
+ */
+router.post('/notifications/:notificationId/reply', authMiddleware, roleMiddleware(['owner']), ownerController.replyToNotification);
+
+/**
+ * @route   GET /api/owner/notifications/:notificationId/conversation
+ * @desc    Get conversation thread for a notification
+ * @access  Private (Owner)
+ */
+router.get('/notifications/:notificationId/conversation', authMiddleware, roleMiddleware(['owner']), ownerController.getConversationThread);
+
+/**
+ * @route   GET /api/owner/conversations
+ * @desc    Get all conversations (grouped notifications)
+ * @access  Private (Owner)
+ */
+router.get('/conversations', authMiddleware, roleMiddleware(['owner']), ownerController.getConversations);
+
 // ==================== ADMIN COMMUNICATION ROUTES ====================
 
 /**
@@ -289,5 +356,28 @@ router.get('/patients', authMiddleware, roleMiddleware(['owner']), ownerControll
  * @access  Private (Owner)
  */
 router.get('/patients/:patientId', authMiddleware, roleMiddleware(['owner']), ownerController.getPatientById);
+
+// ==================== FEEDBACK ROUTES ====================
+
+/**
+ * @route   POST /api/owner/feedback
+ * @desc    Provide feedback on lab, test, order, or system
+ * @access  Private (Owner)
+ */
+router.post(
+  '/feedback',
+  authMiddleware,
+  roleMiddleware(['owner']),
+  ...ownerValidator.validateFeedback,
+  validateRequest,
+  ownerController.provideFeedback
+);
+
+/**
+ * @route   GET /api/owner/feedback
+ * @desc    Get my feedback history
+ * @access  Private (Owner)
+ */
+router.get('/feedback', authMiddleware, roleMiddleware(['owner']), ownerController.getMyFeedback);
 
 module.exports = router;

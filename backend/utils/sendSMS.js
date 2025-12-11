@@ -1,11 +1,9 @@
 /**
  * Send SMS Utility
- * TODO: Implement actual SMS service (Twilio, AWS SNS, etc.)
  */
 
 const sendSMS = async (phoneNumber, message) => {
   try {
-    // TODO: Replace with actual SMS service implementation
     // For now, just log the SMS that would be sent
     console.log('📱 SMS would be sent:');
     console.log(`To: ${phoneNumber}`);

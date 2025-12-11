@@ -50,7 +50,7 @@ exports.recordStockUsage = async (req, res) => {
     await item.save();
 
     // Log action
-    await logAction(staff_id, `Stock Used: ${usedQuantity} of ${item.name}`);
+    await logAction(staff_id, staff.username, `Stock Used: ${usedQuantity} of ${item.name}`, 'StockInventory', item._id, staff.owner_id);
 
     res.json({ message: "Stock usage recorded successfully", item });
   } catch (err) {

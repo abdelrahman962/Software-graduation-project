@@ -5,6 +5,9 @@ const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
 router.post('/login', adminController.login);
 
+// 🟢 Public routes (no authentication required)
+router.get('/contact-info', adminController.getContactInfo);
+
 // ✅ Protect routes: only Admins
 router.use(authMiddleware, roleMiddleware(['admin']));
 
@@ -23,9 +26,17 @@ router.post('/notifications/send', adminController.sendGlobalNotification);
 router.get('/notifications', adminController.getAllNotifications);
 router.put('/notifications/:notificationId/read', adminController.markNotificationAsRead);
 
+// 📝 Feedback routes
+router.get('/feedback', adminController.getAllFeedback);
+
 // 📊 Dashboard & subscriptions
 router.get('/dashboard', adminController.getDashboard);
 router.get('/stats', adminController.getStats);
-router.get('/expiring-subscriptions', adminController.getExpiringSubscriptions);
+router.get('/expiring-subscriptions', adminController.getExpiringSubscriptions); // Uncommented - needed for frontend
+
+// 🆕 Enhanced Dashboard Features
+router.get('/system-health', adminController.getSystemHealth);
+router.get('/realtime-metrics', adminController.getRealTimeMetrics);
+router.get('/alerts', adminController.getAlerts);
 
 module.exports = router;

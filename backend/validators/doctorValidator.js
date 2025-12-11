@@ -69,3 +69,33 @@ exports.validateLabId = [
     .trim()
     .isMongoId().withMessage('Invalid lab ID format')
 ];
+
+// Feedback Validation
+exports.validateFeedback = [
+  body('target_id')
+    .optional()
+    .trim()
+    .isMongoId().withMessage('Invalid target ID format'),
+  
+  body('target_model')
+    .trim()
+    .notEmpty().withMessage('Target model is required')
+    .isIn(['Owner', 'Test', 'Order', 'Service', 'System']).withMessage('Invalid target model'),
+  
+  body('rating')
+    .isInt({ min: 1, max: 5 }).withMessage('Rating must be between 1 and 5'),
+  
+  body('title')
+    .trim()
+    .notEmpty().withMessage('Feedback title is required')
+    .isLength({ min: 5, max: 100 }).withMessage('Title must be 5-100 characters'),
+  
+  body('message')
+    .trim()
+    .notEmpty().withMessage('Feedback message is required')
+    .isLength({ min: 10, max: 1000 }).withMessage('Message must be 10-1000 characters'),
+  
+  body('is_anonymous')
+    .optional()
+    .isBoolean().withMessage('is_anonymous must be true or false')
+];

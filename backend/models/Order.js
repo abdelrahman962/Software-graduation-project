@@ -70,6 +70,25 @@ orderSchema.statics.generateUniqueBarcode = async function() {
   return barcode;
 };
 
+// Helper function to validate and set frontend-generated barcode
+orderSchema.statics.validateAndSetBarcode = async function(orderId, frontendBarcode) {
+  // Validate barcode format
+  const barcodeRegex = /^ORD-\d{13}-[A-Z0-9]{4}$/;
+  if (!barcodeRegex.test(frontendBarcode)) {
+    throw new Error('Invalid barcode format');
+  }
+
+  // Check if barcode already exists
+  const existingOrder = await this.findOne({ barcode: frontendBarcode });
+  if (existingOrder && existingOrder._id.toString() !== orderId.toString()) {
+    throw new Error('Barcode already exists');
+  }
+
+  // Update the order with the frontend-generated barcode
+  await this.findByIdAndUpdate(orderId, { barcode: frontendBarcode });
+  return frontendBarcode;
+};
+
 // Helper function to generate registration token
 orderSchema.statics.generateRegistrationToken = function() {
   const crypto = require('crypto');

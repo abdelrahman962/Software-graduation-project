@@ -24,26 +24,8 @@ router.get('/labs', publicController.getAvailableLabs);
  */
 router.get('/labs/:labId/tests', publicController.getLabTests);
 
-/**
- * @route   GET /api/public/branches/all
- * @desc    Get all available lab branches with pagination
- * @access  Public
- */
-router.get('/branches/all', publicController.getAllAvailableBranches);
 
-/**
- * @route   GET /api/public/branches/nearest
- * @desc    Find nearest lab branches by GPS coordinates
- * @access  Public
- */
-router.get('/branches/nearest', publicController.findNearestBranches);
 
-/**
- * @route   GET /api/public/branches/search
- * @desc    Search branches by city, state, or services
- * @access  Public
- */
-router.get('/branches/search', publicController.searchBranches);
 
 /**
  * @route   GET /api/public/register/verify/:token
@@ -58,5 +40,26 @@ router.get('/register/verify/:token', publicController.verifyRegistrationToken);
  * @access  Public
  */
 router.post('/register/complete', publicController.completeRegistration);
+
+/**
+ * @route   GET /api/public/feedback/system
+ * @desc    Get system feedback for marketing pages
+ * @access  Public
+ */
+router.get('/feedback/system', publicController.getSystemFeedback);
+
+/**
+ * @route   POST /api/public/contact
+ * @desc    Submit contact form for laboratory owners interested in the system
+ * @access  Public
+ */
+router.post('/contact', publicController.submitContactForm);
+
+/**
+ * @route   POST /api/public/login
+ * @desc    Unified login endpoint - checks all user types in one request
+ * @access  Public
+ */
+router.post('/login', loginLimiter, publicController.unifiedLogin);
 
 module.exports = router;

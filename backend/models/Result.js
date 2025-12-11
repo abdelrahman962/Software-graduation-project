@@ -6,6 +6,8 @@ const resultSchema = new mongoose.Schema({
   units: String,
   reference_range: String,
   remarks: String
+}, {
+  timestamps: true
 });
 
 module.exports = mongoose.model('Results', resultSchema);

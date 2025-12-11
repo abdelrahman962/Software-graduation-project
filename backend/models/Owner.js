@@ -2,10 +2,18 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const ownerSchema = new mongoose.Schema({
-  owner_id: { 
-    type:String, 
-    required: true, 
-    unique: true 
+    subscriptionFee: {
+      type: Number,
+      default: 100, // Default fee, can be changed per owner
+      min: 0
+    },
+  lab_name: {
+    type: String,
+    required: true,
+    default: function() {
+      // Auto-generate from name if not provided
+      return `${this.name.first} ${this.name.middle ? this.name.middle + ' ' : ''}${this.name.last}`.trim();
+    }
   },
   name: {
     first: { type: String, required: true },
@@ -89,11 +97,24 @@ const ownerSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Normalize username before saving
-ownerSchema.pre('save', function(next) {
+// Normalize username before saving and check uniqueness
+ownerSchema.pre('save', async function(next) {
   if (this.isModified('username')) {
     // Remove spaces and convert to lowercase
     this.username = this.username.replace(/\s+/g, '.').toLowerCase();
+    
+    // Check uniqueness across all user collections
+    const existingUsers = await Promise.all([
+      mongoose.model('Patient').findOne({ username: this.username }),
+      mongoose.model('Doctor').findOne({ username: this.username }),
+      mongoose.model('Staff').findOne({ username: this.username }),
+      mongoose.model('Admin').findOne({ username: this.username }),
+      mongoose.model('Owner').findOne({ username: this.username, _id: { $ne: this._id } })
+    ]);
+    
+    if (existingUsers.some(user => user !== null)) {
+      return next(new Error('Username already exists across all user roles'));
+    }
   }
   next();
 });

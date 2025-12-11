@@ -1,8 +1,11 @@
 const LabOwner = require('../models/Owner');
 const Notification = require('../models/Notification');
 const Admin = require('../models/Admin');
+const AuditLog = require('../models/AuditLog');
+const Order = require('../models/Order');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
 
 // =================== AUTHENTICATION ====================
 
@@ -74,7 +77,7 @@ exports.approveLabOwner = async (req, res, next) => {
   try {
     const { ownerId } = req.params;
     const adminId = req.user._id; // ✅ Authenticated admin ID from token
-    const { subscription_end } = req.body;
+    const { subscription_end, subscriptionFee } = req.body;
 
     const request = await LabOwner.findById(ownerId);
     if (!request) return res.status(404).json({ message: "❌ Lab Owner request not found" });
@@ -84,13 +87,15 @@ exports.approveLabOwner = async (req, res, next) => {
     const endDate = new Date(subscription_end);
     if (endDate <= new Date()) return res.status(400).json({ message: "⚠️ Subscription end date must be in the future" });
 
-    // ✅ Update lab owner status and admin who approved
+    // ✅ Update lab owner status, admin who approved, and fee
     request.status = 'approved';
     request.is_active = true;
     request.date_subscription = new Date();
     request.subscription_end = endDate;
-    request.admin_id = adminId; // ✅ <-- Add this line
-
+    request.admin_id = adminId;
+    if (typeof subscriptionFee === 'number' && subscriptionFee >= 0) {
+      request.subscriptionFee = subscriptionFee;
+    }
     await request.save();
 
     // 🟢 Send notification to the Lab Owner
@@ -386,11 +391,48 @@ exports.getAllNotifications = async (req, res, next) => {
     const limit = parseInt(req.query.limit) || 20;   // default 20 notifications per page
     const skip = (page - 1) * limit;
 
-    // Fetch paginated notifications
+    // Fetch paginated notifications with sender information
     const notifications = await Notification.find({ receiver_id: adminId, receiver_model: 'Admin' })
-      .sort({ created_at: -1 })
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
+
+    // Populate sender information manually for each notification
+    const populatedNotifications = await Promise.all(
+      notifications.map(async (notification) => {
+        if (notification.sender_id && notification.sender_model) {
+          try {
+            let senderModel;
+            switch (notification.sender_model) {
+              case 'Owner':
+                senderModel = LabOwner;
+                break;
+              case 'Admin':
+                senderModel = Admin;
+                break;
+              case 'Doctor':
+                senderModel = require('../models/Doctor');
+                break;
+              case 'Patient':
+                senderModel = require('../models/Patient');
+                break;
+              case 'Staff':
+                senderModel = require('../models/Staff');
+                break;
+              default:
+                return notification;
+            }
+
+            const sender = await senderModel.findById(notification.sender_id)
+              .select('name email username full_name');
+            notification.sender_id = sender;
+          } catch (error) {
+            console.warn('Error populating sender for notification:', notification._id, error.message);
+          }
+        }
+        return notification;
+      })
+    );
 
     // Total notifications count
     const total = await Notification.countDocuments({ receiver_id: adminId, receiver_model: 'Admin' });
@@ -398,12 +440,58 @@ exports.getAllNotifications = async (req, res, next) => {
     // Unread notifications count
     const unreadCount = await Notification.countDocuments({ receiver_id: adminId, receiver_model: 'Admin', is_read: false });
 
+    // Transform notifications to include 'from' field for frontend compatibility
+    const transformedNotifications = populatedNotifications.map(notification => {
+      const notificationObj = notification.toObject();
+
+      // Add 'from' field if sender exists
+      if (notification.sender_id && notification.sender_model) {
+        let senderName = '';
+        let senderEmail = '';
+
+        try {
+          if (notification.sender_model === 'Owner') {
+            const name = notification.sender_id.name;
+            senderName = name && typeof name === 'object' ? `${name.first || ''} ${name.last || ''}`.trim() : (name || '');
+            senderEmail = notification.sender_id.email || '';
+          } else if (notification.sender_model === 'Admin') {
+            senderName = notification.sender_id.full_name || notification.sender_id.username || '';
+            senderEmail = notification.sender_id.email || '';
+          } else if (notification.sender_model === 'Doctor') {
+            const name = notification.sender_id.name;
+            senderName = name && typeof name === 'object' ? `${name.first || ''} ${name.last || ''}`.trim() : (name || '');
+            senderEmail = notification.sender_id.email || '';
+          } else if (notification.sender_model === 'Patient') {
+            const name = notification.sender_id.name;
+            senderName = name && typeof name === 'object' ? `${name.first || ''} ${name.last || ''}`.trim() : (name || '');
+            senderEmail = notification.sender_id.email || '';
+          } else if (notification.sender_model === 'Staff') {
+            const name = notification.sender_id.name;
+            senderName = name && typeof name === 'object' ? `${name.first || ''} ${name.last || ''}`.trim() : (name || '');
+            senderEmail = notification.sender_id.email || '';
+          }
+
+          if (senderName || senderEmail) {
+            notificationObj.from = {
+              name: senderName || 'Unknown Sender',
+              email: senderEmail || ''
+            };
+          }
+        } catch (error) {
+          console.warn('Error processing sender info for notification:', notification._id, error.message);
+          // Continue without adding 'from' field if there's an error
+        }
+      }
+
+      return notificationObj;
+    });
+
     res.json({
       total,
       page,
       totalPages: Math.ceil(total / limit),
       unreadCount,
-      notifications
+      notifications: transformedNotifications
     });
   } catch (err) {
     next(err);
@@ -439,7 +527,109 @@ exports.markNotificationAsRead = async (req, res, next) => {
   }
 };
 
-// ==================== HELPERS ====================
+// ==================== SYSTEM HEALTH MONITORING ====================
+/**
+ * @desc    Get System Health Status
+ * @route   GET /api/admin/system-health
+ * @access  Private (Admin)
+ */
+// ==================== SYSTEM HEALTH MONITORING ====================
+/**
+ * @desc    Get System Health Status
+ * @route   GET /api/admin/system-health
+ * @access  Private (Admin)
+ */
+exports.getSystemHealth = async (req, res, next) => {
+  try {
+    const startTime = Date.now();
+
+    // Database connection health
+    const dbHealth = mongoose.connection.readyState === 1 ? 'healthy' : 'unhealthy';
+
+    // Response time calculation
+    const responseTime = Date.now() - startTime;
+
+    // Memory usage
+    const memUsage = process.memoryUsage();
+
+    // Recent errors (last 24 hours)
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const recentErrors = await AuditLog.countDocuments({
+      level: 'error',
+      timestamp: { $gte: oneDayAgo }
+    });
+
+    // Active labs count
+    const activeLabs = await LabOwner.countDocuments({ is_active: true });
+
+    res.json({
+      timestamp: new Date(),
+      status: dbHealth === 'healthy' && recentErrors < 10 ? 'healthy' : 'warning',
+      uptime: process.uptime(),
+      database: {
+        status: dbHealth,
+        name: mongoose.connection.name
+      },
+      performance: {
+        responseTime: `${responseTime}ms`,
+        memoryUsage: {
+          rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
+          heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`
+        }
+      },
+      business: {
+        activeLabs,
+        recentErrors
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get all feedback from users
+ * @route   GET /api/admin/feedback
+ * @access  Private (Admin)
+ */
+exports.getAllFeedback = async (req, res, next) => {
+  try {
+    const Feedback = require('../models/Feedback');
+    
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    // Fetch feedback with user information
+    const feedback = await Feedback.find()
+      .populate('user_id', 'full_name email phone_number')
+      .populate('target_id')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    // Add user_model (role) to each feedback item
+    const enrichedFeedback = feedback.map(item => ({
+      ...item,
+      user_role: item.user_model
+    }));
+
+    const total = await Feedback.countDocuments();
+    const pendingCount = await Feedback.countDocuments({ status: 'pending' });
+
+    res.json({
+      feedback: enrichedFeedback,
+      total,
+      pendingCount,
+      page,
+      totalPages: Math.ceil(total / limit)
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 /**
  * Fetch labs with subscriptions expiring within `days` days.
  * @param {number} days Number of days to consider for "expiring soon"
@@ -456,6 +646,336 @@ const fetchExpiringLabs = async (days = 7, lightweight = false) => {
   return await LabOwner.find({ subscription_end: { $lte: soon } }, projection).sort({ subscription_end: 1 });
 };
 
+// ==================== REAL-TIME METRICS SERVICE ====================
+// ==================== REAL-TIME METRICS SERVICE ====================
+const metricsService = {
+  cache: new Map(),
+  cacheTimeout: 5 * 60 * 1000, // 5 minutes
+
+  async getMetrics() {
+    const cacheKey = 'dashboard_metrics';
+    const cached = this.cache.get(cacheKey);
+
+    if (cached && (Date.now() - cached.timestamp) < this.cacheTimeout) {
+      return cached.data;
+    }
+
+    // Calculate fresh metrics
+    const metrics = await this.calculateMetrics();
+
+    // Cache the results
+    this.cache.set(cacheKey, {
+      timestamp: Date.now(),
+      data: metrics
+    });
+
+    return metrics;
+  },
+
+  async calculateMetrics() {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const OrderDetails = require('../models/OrderDetails');
+
+    const [todayOrders, yesterdayOrders, pendingTests, completedToday] = await Promise.all([
+      // Today's orders
+      Order.countDocuments({
+        created_at: { $gte: today }
+      }),
+
+      // Yesterday's orders for comparison
+      Order.countDocuments({
+        created_at: { $gte: yesterday, $lt: today }
+      }),
+
+      // Pending tests
+      OrderDetails.countDocuments({ status: { $in: ['pending', 'in_progress'] } }),
+
+      // Completed tests today
+      OrderDetails.countDocuments({
+        status: 'completed',
+        updated_at: { $gte: today }
+      })
+    ]);
+
+    // Calculate average turnaround time (last 7 days)
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const completedTests = await OrderDetails.find({
+      status: 'completed',
+      updated_at: { $gte: sevenDaysAgo }
+    }).populate('order_id', 'order_date');
+
+    let avgTurnaround = 0;
+    if (completedTests.length > 0) {
+      const totalHours = completedTests.reduce((sum, test) => {
+        const orderDate = test.order_id?.order_date;
+        const completionDate = test.updated_at;
+        if (orderDate && completionDate) {
+          return sum + (completionDate - orderDate) / (1000 * 60 * 60);
+        }
+        return sum;
+      }, 0);
+      avgTurnaround = totalHours / completedTests.length;
+    }
+
+    return {
+      todayOrders,
+      orderGrowth: yesterdayOrders > 0 ? ((todayOrders - yesterdayOrders) / yesterdayOrders * 100) : 0,
+      pendingTests,
+      completedToday,
+      avgTurnaroundHours: Math.round(avgTurnaround * 10) / 10,
+      timestamp: new Date()
+    };
+  }
+};
+
+/**
+ * @desc    Get Real-time Dashboard Metrics
+ * @route   GET /api/admin/realtime-metrics
+ * @access  Private (Admin)
+ */
+exports.getRealTimeMetrics = async (req, res, next) => {
+  try {
+    const metrics = await metricsService.getMetrics();
+    res.json(metrics);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ==================== ALERT SYSTEM WITH SEVERITY ====================
+/*
+// Commented out - Enhanced Dashboard Features
+const ALERT_SEVERITY = {
+  CRITICAL: { level: 1, color: 'red', icon: '🚨', autoEscalate: true, responseTime: 'immediate' },
+  HIGH: { level: 2, color: 'orange', icon: '⚠️', autoEscalate: false, responseTime: 'today' },
+  MEDIUM: { level: 3, color: 'yellow', icon: 'ℹ️', autoEscalate: false, responseTime: 'this week' },
+  LOW: { level: 4, color: 'blue', icon: '📝', autoEscalate: false, responseTime: 'when possible' }
+};
+
+class AlertSystem {
+  static async checkAndCreateAlerts(adminId) {
+    const alerts = [];
+
+    // CRITICAL: System down/unhealthy
+    const systemHealth = await this.checkSystemHealth();
+    if (systemHealth.status === 'critical') {
+      alerts.push({
+        severity: ALERT_SEVERITY.CRITICAL,
+        title: 'SYSTEM CRITICAL',
+        message: 'Critical system failure detected - immediate action required',
+        actionRequired: 'Investigate system immediately',
+        category: 'system'
+      });
+    }
+
+    // HIGH: Subscriptions expiring today
+    const expiringToday = await LabOwner.countDocuments({
+      subscription_end: {
+        $gte: new Date(new Date().setHours(0, 0, 0, 0)),
+        $lt: new Date(new Date().setHours(23, 59, 59, 999))
+      }
+    });
+
+    if (expiringToday > 0) {
+      alerts.push({
+        severity: ALERT_SEVERITY.HIGH,
+        title: 'SUBSCRIPTIONS EXPIRING TODAY',
+        message: `${expiringToday} lab subscription(s) expire today`,
+        actionRequired: 'Contact labs immediately to prevent service disruption',
+        category: 'subscription'
+      });
+    }
+
+    // HIGH: High error rate
+    const errorRate = await this.calculateErrorRate();
+    if (errorRate > 5) {
+      alerts.push({
+        severity: ALERT_SEVERITY.HIGH,
+        title: 'HIGH ERROR RATE DETECTED',
+        message: `System error rate is ${errorRate.toFixed(1)}% - above normal threshold`,
+        actionRequired: 'Monitor system performance and investigate errors',
+        category: 'system'
+      });
+    }
+
+    // MEDIUM: Many pending approvals
+    const pendingApprovals = await LabOwner.countDocuments({ status: 'pending' });
+    if (pendingApprovals > 10) {
+      alerts.push({
+        severity: ALERT_SEVERITY.MEDIUM,
+        title: 'HIGH PENDING APPROVALS',
+        message: `${pendingApprovals} lab applications awaiting approval`,
+        actionRequired: 'Review and process pending applications',
+        category: 'approval'
+      });
+    }
+
+    // MEDIUM: Low test completion rate
+    const completionRate = await this.calculateCompletionRate();
+    if (completionRate < 80) {
+      alerts.push({
+        severity: ALERT_SEVERITY.MEDIUM,
+        title: 'LOW TEST COMPLETION RATE',
+        message: `Test completion rate is ${completionRate.toFixed(1)}% - below target`,
+        actionRequired: 'Monitor lab performance and address bottlenecks',
+        category: 'performance'
+      });
+    }
+
+    // LOW: Subscriptions expiring soon (3-7 days)
+    const expiringSoon = await fetchExpiringLabs(7);
+    const expiringInRange = expiringSoon.filter(lab => {
+      const daysUntilExpiry = Math.ceil((lab.subscription_end - new Date()) / (1000 * 60 * 60 * 24));
+      return daysUntilExpiry > 1 && daysUntilExpiry <= 7;
+    });
+
+    if (expiringInRange.length > 0) {
+      alerts.push({
+        severity: ALERT_SEVERITY.LOW,
+        title: 'SUBSCRIPTIONS EXPIRING SOON',
+        message: `${expiringInRange.length} lab subscription(s) expire within 7 days`,
+        actionRequired: 'Plan renewal discussions with affected labs',
+        category: 'subscription'
+      });
+    }
+
+    // Create notifications for new alerts
+    for (const alert of alerts) {
+      // Check if this alert already exists (avoid duplicates)
+      const existingAlert = await Notification.findOne({
+        receiver_id: adminId,
+        receiver_model: 'Admin',
+        type: 'alert',
+        title: alert.title,
+        is_read: false,
+        created_at: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } // Last 24 hours
+      });
+
+      if (!existingAlert) {
+        await Notification.create({
+          sender_id: null,
+          sender_model: 'System',
+          receiver_id: adminId,
+          receiver_model: 'Admin',
+          type: 'alert',
+          severity: alert.severity.level,
+          title: alert.title,
+          message: alert.message,
+          action_required: alert.actionRequired,
+          category: alert.category,
+          is_read: false
+        });
+      }
+    }
+
+    return alerts;
+  }
+
+  static async checkSystemHealth() {
+    try {
+      // Database health
+      const dbHealth = mongoose.connection.readyState === 1;
+
+      // Memory usage check
+      const memUsage = process.memoryUsage();
+      const memoryHealthy = memUsage.heapUsed < 500 * 1024 * 1024; // Less than 500MB
+
+      // Recent errors
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const recentErrors = await AuditLog.countDocuments({
+        level: 'error',
+        timestamp: { $gte: oneHourAgo }
+      });
+
+      const status = (!dbHealth || !memoryHealthy || recentErrors > 50) ? 'critical' :
+                     (recentErrors > 10) ? 'warning' : 'healthy';
+
+      return { status, dbHealth, memoryHealthy, recentErrors };
+    } catch (err) {
+      return { status: 'critical', error: err.message };
+    }
+  }
+
+  static async calculateErrorRate() {
+    try {
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const [totalLogs, errorLogs] = await Promise.all([
+        AuditLog.countDocuments({ timestamp: { $gte: oneDayAgo } }),
+        AuditLog.countDocuments({ level: 'error', timestamp: { $gte: oneDayAgo } })
+      ]);
+
+      return totalLogs > 0 ? (errorLogs / totalLogs) * 100 : 0;
+    } catch (err) {
+      return 0;
+    }
+  }
+
+  static async calculateCompletionRate() {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const [totalTests, completedTests] = await Promise.all([
+        OrderDetails.countDocuments({ created_at: { $gte: sevenDaysAgo } }),
+        OrderDetails.countDocuments({
+          status: 'completed',
+          created_at: { $gte: sevenDaysAgo }
+        })
+      ]);
+
+      return totalTests > 0 ? (completedTests / totalTests) * 100 : 100;
+    } catch (err) {
+      return 100;
+    }
+  }
+}
+*/
+
+/**
+ * @desc    Get Active Alerts with Severity
+ * @route   GET /api/admin/alerts
+ * @access  Private (Admin)
+ */
+exports.getAlerts = async (req, res, next) => {
+  try {
+    const adminId = req.user._id;
+
+    // Get existing unread system alerts/notifications
+    const unreadAlerts = await Notification.find({
+      receiver_id: adminId,
+      receiver_model: 'Admin',
+      type: { $in: ['system', 'maintenance'] },
+      is_read: false
+    }).sort({ createdAt: -1 });
+
+    // Group alerts by severity (assuming we add severity to Notification model later)
+    // For now, treat all as medium priority
+    const alertsBySeverity = {
+      critical: [], // unreadAlerts.filter(a => a.severity === 1),
+      high: [], // unreadAlerts.filter(a => a.severity === 2),
+      medium: unreadAlerts, // unreadAlerts.filter(a => a.severity === 3),
+      low: [] // unreadAlerts.filter(a => a.severity === 4)
+    };
+
+    res.json({
+      summary: {
+        total: unreadAlerts.length,
+        critical: alertsBySeverity.critical.length,
+        high: alertsBySeverity.high.length,
+        medium: alertsBySeverity.medium.length,
+        low: alertsBySeverity.low.length
+      },
+      alerts: unreadAlerts,
+      newAlertsCount: 0 // For now, no new alerts generation
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ==================== EXPIRING / EXPIRED SUBSCRIPTIONS ====================
 // ==================== EXPIRING / EXPIRED SUBSCRIPTIONS ====================
 exports.getExpiringSubscriptions = async (req, res, next) => {
   try {
@@ -491,22 +1011,24 @@ exports.getDashboard = async (req, res, next) => {
   try {
     const adminId = req.user._id;
 
-    const [totalLabs, pendingRequests, expiringLabs, unreadNotifications] = await Promise.all([
+    const [totalLabs, pendingRequests, unreadNotifications, expiringLabs] = await Promise.all([
       LabOwner.countDocuments(),
       LabOwner.countDocuments({ status: 'pending' }),
-      fetchExpiringLabs(7, true), // lightweight mode for dashboard
-      Notification.countDocuments({ 
-        receiver_id: adminId, 
-        receiver_model: 'Admin', 
-        is_read: false 
-      })
+      Notification.countDocuments({
+        receiver_id: adminId,
+        receiver_model: 'Admin',
+        is_read: false
+      }),
+      fetchExpiringLabs(7, true)
     ]);
+
+    const expiringLabsCount = expiringLabs.length;
 
     res.json({
       totalLabs,
       pendingRequests,
-      expiringLabsCount: expiringLabs.length,
-      expiringLabs,   // lightweight: only name and subscription_end
+      expiringLabsCount,
+      expiringLabs,
       unreadNotifications
     });
   } catch (err) {
@@ -515,20 +1037,48 @@ exports.getDashboard = async (req, res, next) => {
 };
 
 /**
- * @desc    Get System Statistics
- * @route   GET /api/admin/stats
- * @access  Private (Admin)
+ * @desc    Get Admin Contact Information for Landing Page
+ * @route   GET /api/admin/contact-info
+ * @access  Public
  */
+exports.getContactInfo = async (req, res, next) => {
+  try {
+    // Get the first admin (assuming there's only one main admin for contact info)
+    const admin = await Admin.findOne({}, {
+      full_name: 1,
+      phone_number: 1,
+      email: 1,
+      _id: 0
+    });
+
+    if (!admin) {
+      return res.status(404).json({ message: 'Admin contact information not found' });
+    }
+
+    res.json({
+      success: true,
+      contact: {
+        name: admin.full_name ? `${admin.full_name.first} ${admin.full_name.last}`.trim() : 'Medical Lab System',
+        phone: admin.phone_number || '',
+        email: admin.email || ''
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 exports.getStats = async (req, res, next) => {
   try {
     const Patient = require('../models/Patient');
     const Doctor = require('../models/Doctor');
     const Staff = require('../models/Staff');
     const Order = require('../models/Order');
-    const Invoice = require('../models/Invoices');
 
     // Get counts
-    const [activeLabs, totalPatients, totalDoctors, totalStaff, totalOrders, activeSubscriptions] = await Promise.all([
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+    
+    const [activeLabs, totalPatients, totalDoctors, totalStaff, totalOrders, subscriptionsEndingSoon] = await Promise.all([
       LabOwner.countDocuments({ is_active: true }),
       Patient.countDocuments(),
       Doctor.countDocuments(),
@@ -536,14 +1086,17 @@ exports.getStats = async (req, res, next) => {
       Order.countDocuments(),
       LabOwner.countDocuments({ 
         is_active: true, 
-        subscription_end: { $gte: new Date() } 
+        subscription_end: { 
+          $gte: new Date(),
+          $lte: thirtyDaysFromNow
+        } 
       })
     ]);
 
-    // Calculate total revenue from paid invoices
-    const revenueResult = await Invoice.aggregate([
-      { $match: { status: 'Paid' } },
-      { $group: { _id: null, totalRevenue: { $sum: '$total_amount' } } }
+    // Calculate total revenue from active lab owners' subscription fees
+    const revenueResult = await LabOwner.aggregate([
+      { $match: { is_active: true } },
+      { $group: { _id: null, totalRevenue: { $sum: '$subscriptionFee' } } }
     ]);
     const totalRevenue = revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
 
@@ -552,8 +1105,8 @@ exports.getStats = async (req, res, next) => {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     
     const [recentLabs, recentOrders] = await Promise.all([
-      LabOwner.countDocuments({ created_at: { $gte: thirtyDaysAgo } }),
-      Order.countDocuments({ created_at: { $gte: thirtyDaysAgo } })
+      LabOwner.countDocuments({ createdAt: { $gte: thirtyDaysAgo } }),
+      Order.countDocuments({ createdAt: { $gte: thirtyDaysAgo } })
     ]);
 
     res.json({
@@ -564,7 +1117,7 @@ exports.getStats = async (req, res, next) => {
         totalDoctors,
         totalStaff,
         totalOrders,
-        activeSubscriptions,
+        subscriptionsEndingSoon,
         totalRevenue: totalRevenue.toFixed(2),
         recentActivity: {
           newLabsLast30Days: recentLabs,
@@ -576,3 +1129,5 @@ exports.getStats = async (req, res, next) => {
     next(err);
   }
 };
+
+

@@ -1,3 +1,19 @@
+// Helper: Calculate tiered subscription fee
+async function calculateTieredFee(ownerId) {
+  const patientCount = await Patient.countDocuments({ owner_id: ownerId });
+
+  // Patient fee
+  let patientFee = 0;
+  if (patientCount <= 500) patientFee = 50;
+  else if (patientCount > 500 && patientCount <= 2000) patientFee = 100;
+  else if (patientCount > 2000) patientFee = 200;
+
+  return {
+    total: patientFee,
+    patientFee,
+    patientCount
+  };
+}
 const LabOwner = require('../models/Owner');
 const Staff = require('../models/Staff');
 const Patient = require('../models/Patient');
@@ -8,6 +24,7 @@ const OrderDetails = require('../models/OrderDetails');
 const Invoice = require('../models/Invoices');
 const Notification = require('../models/Notification');
 const AuditLog = require('../models/AuditLog');
+const Feedback = require('../models/Feedback');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -24,7 +41,7 @@ exports.login = async (req, res, next) => {
 
     // Validate input
     if (!username || !password) {
-      return res.status(400).json({ message: '⚠️ Username and password are required' });
+      return res.status(400).json({ success: false, error: '⚠️ Username and password are required' });
     }
 
     // Normalize username (remove spaces, convert to lowercase)
@@ -33,22 +50,22 @@ exports.login = async (req, res, next) => {
     // Find owner by username or email
     const owner = await LabOwner.findOne({ $or: [{ username: normalizedUsername }, { email: username }] });
     if (!owner) {
-      return res.status(401).json({ message: '❌ Invalid credentials' });
+      return res.status(401).json({ success: false, error: '❌ Invalid credentials' });
     }
 
     // Check if owner is approved and active
     if (owner.status !== 'approved') {
-      return res.status(403).json({ message: '⚠️ Account is not approved yet. Please wait for admin approval.' });
+      return res.status(403).json({ success: false, error: '⚠️ Account is not approved yet. Please wait for admin approval.' });
     }
 
     if (!owner.is_active) {
-      return res.status(403).json({ message: '⚠️ Account is inactive. Please contact support.' });
+      return res.status(403).json({ success: false, error: '⚠️ Account is inactive. Please contact support.' });
     }
 
     // Compare password
     const isMatch = await owner.comparePassword(password);
     if (!isMatch) {
-      return res.status(401).json({ message: '❌ Invalid credentials' });
+      return res.status(401).json({ success: false, error: '❌ Invalid credentials' });
     }
 
     // Check subscription status and calculate days remaining
@@ -83,7 +100,10 @@ exports.login = async (req, res, next) => {
       { expiresIn: '7d' }
     );
 
+    // Calculate dynamic fee
+    const feeInfo = await calculateTieredFee(owner._id);
     res.json({
+      success: true,
       message: subscriptionExpired 
         ? '⚠️ Login successful - SUBSCRIPTION EXPIRED' 
         : '✅ Login successful',
@@ -95,7 +115,9 @@ exports.login = async (req, res, next) => {
         email: owner.email,
         username: owner.username,
         subscription_end: owner.subscription_end,
-        subscription_expired: subscriptionExpired
+        subscription_expired: subscriptionExpired,
+        subscriptionFee: feeInfo.total,
+        feeBreakdown: feeInfo
       },
       ...(subscriptionWarning && { warning: subscriptionWarning })
     });
@@ -113,13 +135,18 @@ exports.login = async (req, res, next) => {
  */
 exports.requestAccess = async (req, res, next) => {
   try {
-    const { first_name, middle_name, last_name, identity_number, birthday, gender, social_status, phone, address, qualification, profession_license, bank_iban, email, username, password } = req.body;
+    const { first_name, middle_name, last_name, identity_number, birthday, gender, social_status, phone, address, qualification, profession_license, bank_iban, email, username, password, selected_plan } = req.body;
 
     if (!first_name || !last_name || !identity_number || !email || !username || !password)
-      return res.status(400).json({ message: '⚠️ Missing required fields' });
+      return res.status(400).json({ success: false, error: '⚠️ Missing required fields' });
 
     const existingOwner = await LabOwner.findOne({ $or: [{ email }, { username }, { identity_number }] });
-    if (existingOwner) return res.status(400).json({ message: '⚠️ Lab Owner with provided email, username, or ID already exists' });
+    if (existingOwner) return res.status(400).json({ success: false, error: '⚠️ Lab Owner with provided email, username, or ID already exists' });
+
+    // Set subscription fee based on selected plan
+    let subscriptionFee = 100; // Default
+    if (selected_plan === 'Professional') subscriptionFee = 200;
+    else if (selected_plan === 'Enterprise') subscriptionFee = 400;
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const owner_id = `OWN-${Date.now()}`;
@@ -142,7 +169,8 @@ exports.requestAccess = async (req, res, next) => {
       date_subscription: null,
       status: 'pending',
       admin_id: null,
-      is_active: false
+      is_active: false,
+      subscriptionFee
     });
 
     const admins = await Admin.find({});
@@ -153,11 +181,12 @@ exports.requestAccess = async (req, res, next) => {
       receiver_model: 'Admin',
       type: 'system',
       title: 'New Lab Owner Request',
-      message: `Lab Owner ${first_name} ${last_name} has requested access to the system.`
+      message: `Lab Owner ${first_name} ${last_name} has requested access to the system.${selected_plan ? ` Selected Plan: ${selected_plan} (\$${subscriptionFee}/month)` : ''}`
     }));
     await Notification.insertMany(notifications);
 
     res.status(201).json({
+      success: true,
       message: '✅ Lab Owner request submitted successfully. Waiting for admin approval.',
       labOwner: newRequest
     });
@@ -215,9 +244,13 @@ exports.getProfile = async (req, res, next) => {
       }
     }
 
+    // Calculate dynamic fee
+    const feeInfo = await calculateTieredFee(owner._id);
     res.json({
       ...owner.toObject(),
-      subscriptionStatus
+      subscriptionStatus,
+      subscriptionFee: feeInfo.total,
+      feeBreakdown: feeInfo
     });
   } catch (err) {
     next(err);
@@ -240,7 +273,24 @@ exports.updateProfile = async (req, res, next) => {
 
     // Update allowed fields
     if (phone_number) owner.phone_number = phone_number;
-    if (address) owner.address = address;
+    if (address) {
+      // Convert string address to proper format matching addressSchema.js
+      if (typeof address === 'string') {
+        const addressParts = address.split(',').map(part => part.trim());
+        owner.address = {
+          street: addressParts[0] || '',
+          city: addressParts[1] || '',
+          country: addressParts[2] || 'Palestine'
+        };
+      } else {
+        // Ensure only schema fields are used
+        owner.address = {
+          street: address.street || '',
+          city: address.city || '',
+          country: address.country || 'Palestine'
+        };
+      }
+    }
     if (email) owner.email = email;
     if (bank_iban) owner.bank_iban = bank_iban;
 
@@ -265,11 +315,11 @@ exports.changePassword = async (req, res, next) => {
     const { currentPassword, newPassword } = req.body;
 
     if (!currentPassword || !newPassword) {
-      return res.status(400).json({ message: '⚠️ Current password and new password are required' });
+      return res.status(400).json({ success: false, error: '⚠️ Current password and new password are required' });
     }
 
     if (newPassword.length < 6) {
-      return res.status(400).json({ message: '⚠️ New password must be at least 6 characters' });
+      return res.status(400).json({ success: false, error: '⚠️ New password must be at least 6 characters' });
     }
 
     const owner = await LabOwner.findById(req.user._id);
@@ -280,14 +330,14 @@ exports.changePassword = async (req, res, next) => {
     // Verify current password
     const isMatch = await owner.comparePassword(currentPassword);
     if (!isMatch) {
-      return res.status(401).json({ message: '❌ Current password is incorrect' });
+      return res.status(401).json({ success: false, error: '❌ Current password is incorrect' });
     }
 
     // Update password
     owner.password = await bcrypt.hash(newPassword, 10);
     await owner.save();
 
-    res.json({ message: '✅ Password changed successfully' });
+    res.json({ success: true, message: '✅ Password changed successfully' });
   } catch (err) {
     next(err);
   }
@@ -375,6 +425,18 @@ exports.addStaff = async (req, res, next) => {
       return res.status(400).json({ message: '⚠️ Staff with this identity number, email, username, or employee number already exists' });
     }
 
+    // Process address - handle both string and object formats
+    let processedAddress = address;
+    if (typeof address === 'string') {
+      // Parse address string like "Ramallah, Palestine"
+      const addressParts = address.split(',').map(part => part.trim());
+      processedAddress = {
+        street: '',
+        city: addressParts[0] || '',
+        country: addressParts[1] || 'Palestine'
+      };
+    }
+
     // Create new staff
     const newStaff = new Staff({
       full_name,
@@ -383,7 +445,7 @@ exports.addStaff = async (req, res, next) => {
       gender,
       social_status,
       phone_number,
-      address,
+      address: processedAddress,
       qualification,
       profession_license,
       employee_number: employee_number || `EMP-${Date.now()}`,
@@ -458,7 +520,19 @@ exports.updateStaff = async (req, res, next) => {
     // Update allowed fields
     if (full_name) staff.full_name = full_name;
     if (phone_number) staff.phone_number = phone_number;
-    if (address) staff.address = address;
+    if (address) {
+      // Process address - handle both string and object formats
+      if (typeof address === 'string') {
+        const addressParts = address.split(',').map(part => part.trim());
+        staff.address = {
+          street: '',
+          city: addressParts[0] || '',
+          country: addressParts[1] || 'Palestine'
+        };
+      } else {
+        staff.address = address;
+      }
+    }
     if (qualification) staff.qualification = qualification;
     if (profession_license) staff.profession_license = profession_license;
     if (bank_iban) staff.bank_iban = bank_iban;
@@ -519,6 +593,196 @@ exports.deleteStaff = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Get All Doctors
+ * @route   GET /api/owner/doctors
+ * @access  Private (Owner)
+ */
+exports.getAllDoctors = async (req, res, next) => {
+  try {
+    const Doctor = require('../models/Doctor');
+    const doctors = await Doctor.find({ owner_id: req.user._id });
+    res.json({ count: doctors.length, doctors });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get Single Doctor
+ * @route   GET /api/owner/doctors/:doctorId
+ * @access  Private (Owner)
+ */
+exports.getDoctorById = async (req, res, next) => {
+  try {
+    const Doctor = require('../models/Doctor');
+    const doctor = await Doctor.findOne({
+      _id: req.params.doctorId,
+      owner_id: req.user._id
+    });
+
+    if (!doctor) {
+      return res.status(404).json({ message: '❌ Doctor not found' });
+    }
+
+    res.json(doctor);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Add New Doctor
+ * @route   POST /api/owner/doctors
+ * @access  Private (Owner)
+ */
+exports.addDoctor = async (req, res, next) => {
+  try {
+    const Doctor = require('../models/Doctor');
+    const {
+      name,
+      phone_number,
+      email,
+      specialty,
+      license_number,
+      address
+    } = req.body;
+
+    // Validate required fields
+    if (!name || !email) {
+      return res.status(400).json({ message: '⚠️ Doctor name and email are required' });
+    }
+
+    // Check if email already exists
+    const existingDoctor = await Doctor.findOne({ email, owner_id: req.user._id });
+    if (existingDoctor) {
+      return res.status(400).json({ message: '⚠️ Doctor with this email already exists in your lab' });
+    }
+
+    const newDoctor = new Doctor({
+      name,
+      phone_number,
+      email,
+      specialty,
+      license_number,
+      address,
+      owner_id: req.user._id
+    });
+
+    await newDoctor.save();
+
+    // Create audit log
+    await AuditLog.create({
+      staff_id: null,
+      action: 'CREATE_DOCTOR',
+      table_name: 'Doctor',
+      record_id: newDoctor._id,
+      owner_id: req.user._id
+    });
+
+    res.status(201).json({ 
+      message: '✅ Doctor added successfully', 
+      doctor: newDoctor
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Update Doctor
+ * @route   PUT /api/owner/doctors/:doctorId
+ * @access  Private (Owner)
+ */
+exports.updateDoctor = async (req, res, next) => {
+  try {
+    const Doctor = require('../models/Doctor');
+    const doctor = await Doctor.findOne({ 
+      _id: req.params.doctorId, 
+      owner_id: req.user._id 
+    });
+
+    if (!doctor) {
+      return res.status(404).json({ message: '❌ Doctor not found' });
+    }
+
+    const {
+      name,
+      phone_number,
+      email,
+      specialty,
+      license_number,
+      address
+    } = req.body;
+
+    // Update fields
+    if (name) doctor.name = name;
+    if (phone_number) doctor.phone_number = phone_number;
+    if (email) doctor.email = email;
+    if (specialty) doctor.specialty = specialty;
+    if (license_number) doctor.license_number = license_number;
+    if (address) doctor.address = address;
+
+    await doctor.save();
+
+    // Create audit log
+    await AuditLog.create({
+      staff_id: null,
+      action: 'UPDATE_DOCTOR',
+      table_name: 'Doctor',
+      record_id: doctor._id,
+      owner_id: req.user._id
+    });
+
+    res.json({ 
+      message: '✅ Doctor updated successfully', 
+      doctor
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Delete Doctor
+ * @route   DELETE /api/owner/doctors/:doctorId
+ * @access  Private (Owner)
+ */
+exports.deleteDoctor = async (req, res, next) => {
+  try {
+    const Doctor = require('../models/Doctor');
+    const doctor = await Doctor.findOne({ 
+      _id: req.params.doctorId, 
+      owner_id: req.user._id 
+    });
+
+    if (!doctor) {
+      return res.status(404).json({ message: '❌ Doctor not found' });
+    }
+
+    // Check if doctor is referenced in any orders
+    const ordersUsingDoctor = await Order.find({ doctor_id: doctor._id });
+    if (ordersUsingDoctor.length > 0) {
+      return res.status(400).json({ message: '⚠️ Cannot delete doctor. They are referenced in existing orders.' });
+    }
+
+    // Create audit log
+    await AuditLog.create({
+      staff_id: null,
+      action: 'DELETE_DOCTOR',
+      table_name: 'Doctor',
+      record_id: doctor._id,
+      owner_id: req.user._id
+    });
+
+    await Doctor.findByIdAndDelete(doctor._id);
+
+    res.json({ message: '✅ Doctor deleted successfully' });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // ==================== DEVICE MANAGEMENT ====================
 
 /**
@@ -528,7 +792,7 @@ exports.deleteStaff = async (req, res, next) => {
  */
 exports.getAllDevices = async (req, res, next) => {
   try {
-    const devices = await Device.find({ owner_id: req.user._id }).populate('staff_id', 'full_name employee_number');
+    const devices = await Device.find({ owner_id: req.user._id }).populate('staff_id');
     res.json({ count: devices.length, devices });
   } catch (err) {
     next(err);
@@ -545,7 +809,7 @@ exports.getDeviceById = async (req, res, next) => {
     const device = await Device.findOne({
       _id: req.params.deviceId,
       owner_id: req.user._id
-    }).populate('staff_id', 'full_name employee_number');
+    }).populate('staff_id');
 
     if (!device) {
       return res.status(404).json({ message: '❌ Device not found' });
@@ -619,7 +883,7 @@ exports.addDevice = async (req, res, next) => {
 
     res.status(201).json({ 
       message: '✅ Device added successfully', 
-      device: await Device.findById(newDevice._id).populate('staff_id', 'full_name')
+      device: await Device.findById(newDevice._id).populate('staff_id')
     });
   } catch (err) {
     next(err);
@@ -682,7 +946,7 @@ exports.updateDevice = async (req, res, next) => {
 
     res.json({ 
       message: '✅ Device updated successfully', 
-      device: await Device.findById(device._id).populate('staff_id', 'full_name')
+      device: await Device.findById(device._id).populate('staff_id')
     });
   } catch (err) {
     next(err);
@@ -755,7 +1019,7 @@ exports.assignStaffToDevice = async (req, res, next) => {
     });
 
     const populatedDevice = await Device.findById(device._id)
-      .populate('staff_id', 'full_name employee_number username');
+      .populate('staff_id');
 
     res.json({ 
       success: true,
@@ -867,7 +1131,6 @@ exports.addTest = async (req, res, next) => {
     const {
       test_code,
       test_name,
-      sample_type,
       tube_type,
       is_active,
       device_id,
@@ -1290,6 +1553,87 @@ exports.deleteInventoryItem = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Add Stock Input to Inventory Item
+ * @route   POST /api/owner/inventory/input
+ * @access  Private (Owner)
+ */
+exports.addStockInput = async (req, res, next) => {
+  try {
+    const { Inventory, StockInput } = require('../models/Inventory');
+    const {
+      item_id,
+      quantity,
+      supplier,
+      batch_number,
+      expiration_date,
+      cost_per_unit,
+      notes
+    } = req.body;
+
+    // Validate required fields
+    if (!item_id || !quantity) {
+      return res.status(400).json({ message: '⚠️ Item ID and quantity are required' });
+    }
+
+    // Find the inventory item
+    const item = await Inventory.findOne({ 
+      _id: item_id, 
+      owner_id: req.user._id 
+    });
+
+    if (!item) {
+      return res.status(404).json({ message: '❌ Inventory item not found' });
+    }
+
+    // Create stock input record
+    const stockInput = new StockInput({
+      item_id,
+      quantity: parseInt(quantity),
+      supplier,
+      batch_number,
+      expiration_date,
+      cost_per_unit: cost_per_unit || 0,
+      notes,
+      input_date: new Date()
+    });
+
+    await stockInput.save();
+
+    // Update inventory count
+    item.count += parseInt(quantity);
+    item.balance = item.count;
+    if (expiration_date) {
+      item.expiration_date = expiration_date;
+    }
+    await item.save();
+
+    // Create audit log
+    await AuditLog.create({
+      staff_id: null,
+      username: req.user.username,
+      action: 'STOCK_INPUT',
+      table_name: 'Inventory',
+      record_id: item._id,
+      owner_id: req.user._id,
+      message: `Added ${quantity} units to ${item.name}`
+    });
+
+    // Check if stock is no longer low
+    if (item.count > item.critical_level) {
+      // Could send notification that stock is back to normal
+    }
+
+    res.status(201).json({ 
+      message: '✅ Stock input added successfully', 
+      item,
+      stockInput
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // ==================== DASHBOARD & ANALYTICS ====================
 
 /**
@@ -1300,9 +1644,16 @@ exports.deleteInventoryItem = async (req, res, next) => {
 exports.getDashboard = async (req, res, next) => {
   try {
     // Get counts
-    const staffCount = await Staff.countDocuments({ owner_id: req.user._id });
-    const deviceCount = await Device.countDocuments({ owner_id: req.user._id });
-    const testCount = await Test.countDocuments({ owner_id: req.user._id });
+    const [staffCount, deviceCount, testCount] = await Promise.all([
+      Staff.countDocuments({ owner_id: req.user._id }),
+      Device.countDocuments({ owner_id: req.user._id }),
+      Test.countDocuments({ owner_id: req.user._id })
+    ]);
+    
+    // Get unique patients who have orders with this lab
+    const patientOrders = await Order.find({ owner_id: req.user._id }).distinct('patient_id');
+    const patientCount = patientOrders.filter(id => id != null).length;
+    
     const { Inventory } = require('../models/Inventory');
     const inventoryCount = await Inventory.countDocuments({ owner_id: req.user._id });
 
@@ -1340,7 +1691,7 @@ exports.getDashboard = async (req, res, next) => {
       receiver_id: req.user._id,
       receiver_model: 'Owner'
     })
-    .sort({ created_at: -1 })
+    .sort({ createdAt: -1 })
     .limit(5);
 
     const unreadNotifications = await Notification.countDocuments({ 
@@ -1354,6 +1705,7 @@ exports.getDashboard = async (req, res, next) => {
         staff: staffCount,
         devices: deviceCount,
         tests: testCount,
+        patients: patientCount,
         inventory: inventoryCount
       },
       orders: {
@@ -1427,11 +1779,70 @@ exports.getAllOrders = async (req, res, next) => {
       Order.countDocuments(query)
     ]);
 
+    // Filter out orders where patient_id doesn't exist (deleted/invalid reference)
+    // and where patient is not fully registered
+    const validOrders = orders.filter(order => {
+      // Include only if patient_id exists and populated successfully
+      // OR if temp_patient_info exists (for orders awaiting patient registration)
+      return order.patient_id || order.temp_patient_info?.full_name;
+    });
+
+    // Enrich orders with test details
+    const enrichedOrders = await Promise.all(validOrders.map(async (order) => {
+      const orderDetails = await OrderDetails.find({ order_id: order._id })
+        .populate('test_id', 'test_name test_code price')
+        .populate('staff_id', 'full_name employee_number')
+        .select('test_id staff_id status');
+      
+      const orderObj = order.toObject();
+      
+      // Add flattened patient and doctor names for easier access
+      // Try patient_id first, then fall back to temp_patient_info
+      if (order.patient_id?.full_name) {
+        orderObj.patient_name = `${order.patient_id.full_name.first || ''} ${order.patient_id.full_name.middle || ''} ${order.patient_id.full_name.last || ''}`.trim();
+      } else if (order.temp_patient_info?.full_name) {
+        orderObj.patient_name = `${order.temp_patient_info.full_name.first || ''} ${order.temp_patient_info.full_name.middle || ''} ${order.temp_patient_info.full_name.last || ''}`.trim();
+      } else {
+        orderObj.patient_name = 'Unknown Patient';
+      }
+      
+      orderObj.doctor_name = order.doctor_id?.name || '-';
+      
+      // Get results for all order details
+      const detailIds = orderDetails.map(d => d._id);
+      const Result = require('../models/Result');
+      const results = await Result.find({ detail_id: { $in: detailIds } });
+      
+      // Add test details with staff assignments and results
+      orderObj.order_details = orderDetails.map(detail => {
+        const result = results.find(r => r.detail_id.toString() === detail._id.toString());
+        return {
+          test_name: detail.test_id?.test_name || 'Unknown Test',
+          test_code: detail.test_id?.test_code,
+          price: detail.test_id?.price,
+          status: detail.status,
+          staff_name: detail.staff_id?.full_name 
+            ? `${detail.staff_id.full_name.first || ''} ${detail.staff_id.full_name.last || ''}`.trim()
+            : null,
+          staff_employee_number: detail.staff_id?.employee_number,
+          has_result: !!result,
+          result_value: result?.result_value || null,
+          result_units: result?.units || null,
+          result_reference_range: result?.reference_range || null,
+          result_remarks: result?.remarks || null
+        };
+      });
+      
+      orderObj.test_count = orderDetails.length;
+      
+      return orderObj;
+    }));
+
     res.json({
-      total,
+      total: enrichedOrders.length,
       page: parseInt(page),
-      totalPages: Math.ceil(total / parseInt(limit)),
-      orders
+      totalPages: Math.ceil(enrichedOrders.length / parseInt(limit)),
+      orders: enrichedOrders
     });
   } catch (err) {
     next(err);
@@ -1530,6 +1941,17 @@ exports.getReports = async (req, res, next) => {
       }
     });
 
+    // Get expenses
+    const staff = await Staff.find({ owner_id: req.user._id });
+    const totalSalaries = staff.reduce((sum, s) => sum + (s.salary || 0), 0);
+    
+    // Calculate subscription fee
+    const subscriptionFee = await calculateTieredFee(req.user._id);
+    const subscriptions = subscriptionFee.total;
+    
+    // Inventory expenses - placeholder for now (set to 0)
+    const inventory = 0;
+
     res.json({
       period: { start, end },
       orders: {
@@ -1541,6 +1963,11 @@ exports.getReports = async (req, res, next) => {
         total: totalRevenue,
         paid: paidRevenue,
         pending: totalRevenue - paidRevenue
+      },
+      expenses: {
+        salaries: totalSalaries,
+        subscriptions: subscriptions,
+        inventory: inventory
       },
       staffPerformance: Object.values(staffPerformance).sort((a, b) => b.count - a.count)
     });
@@ -1570,7 +1997,7 @@ exports.getNotifications = async (req, res, next) => {
     }
 
     const notifications = await Notification.find(query)
-      .sort({ created_at: -1 })
+      .sort({ createdAt: -1 })
       .populate('sender_id', 'name username');
 
     res.json({ count: notifications.length, notifications });
@@ -1736,6 +2163,167 @@ exports.contactAdmin = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Reply to Notification
+ * @route   POST /api/owner/notifications/:notificationId/reply
+ * @access  Private (Owner)
+ */
+exports.replyToNotification = async (req, res, next) => {
+  try {
+    const { notificationId } = req.params;
+    const { message } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ message: '⚠️ Reply message is required' });
+    }
+
+    // Get the original notification
+    const originalNotification = await Notification.findOne({
+      _id: notificationId,
+      receiver_id: req.user._id,
+      receiver_model: 'Owner'
+    });
+
+    if (!originalNotification) {
+      return res.status(404).json({ message: '❌ Notification not found' });
+    }
+
+    // Determine conversation_id (use parent's conversation_id or original notification's _id)
+    const conversationId = originalNotification.conversation_id || originalNotification._id;
+
+    // Create reply notification
+    const replyNotification = await Notification.create({
+      sender_id: req.user._id,
+      sender_model: 'Owner',
+      receiver_id: originalNotification.sender_id,
+      receiver_model: originalNotification.sender_model,
+      type: 'message',
+      title: `Re: ${originalNotification.title}`,
+      message,
+      parent_id: notificationId,
+      conversation_id: conversationId,
+      is_reply: true
+    });
+
+    // Update original notification's conversation_id if it doesn't have one
+    if (!originalNotification.conversation_id) {
+      originalNotification.conversation_id = originalNotification._id;
+      await originalNotification.save();
+    }
+
+    res.status(201).json({
+      message: '✅ Reply sent successfully',
+      notification: replyNotification
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get Conversation Thread
+ * @route   GET /api/owner/notifications/:notificationId/conversation
+ * @access  Private (Owner)
+ */
+exports.getConversationThread = async (req, res, next) => {
+  try {
+    const { notificationId } = req.params;
+
+    // Get the notification to find its conversation_id
+    const notification = await Notification.findById(notificationId);
+
+    if (!notification) {
+      return res.status(404).json({ message: '❌ Notification not found' });
+    }
+
+    // Verify owner has access to this conversation
+    if (notification.receiver_id.toString() !== req.user._id.toString() &&
+        notification.sender_id?.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: '❌ Access denied' });
+    }
+
+    const conversationId = notification.conversation_id || notification._id;
+
+    // Get all messages in the conversation
+    const messages = await Notification.find({
+      $or: [
+        { _id: conversationId },
+        { conversation_id: conversationId }
+      ]
+    })
+    .sort({ createdAt: 1 });
+
+    res.json({
+      conversation_id: conversationId,
+      message_count: messages.length,
+      messages
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get All Conversations (grouped notifications)
+ * @route   GET /api/owner/conversations
+ * @access  Private (Owner)
+ */
+exports.getConversations = async (req, res, next) => {
+  try {
+    // Get all notifications where owner is sender or receiver
+    const allNotifications = await Notification.find({
+      $or: [
+        { receiver_id: req.user._id, receiver_model: 'Owner' },
+        { sender_id: req.user._id, sender_model: 'Owner' }
+      ]
+    })
+    .sort({ createdAt: -1 });
+
+    // Group by conversation_id
+    const conversationMap = new Map();
+
+    for (const notification of allNotifications) {
+      const convId = (notification.conversation_id || notification._id).toString();
+      
+      if (!conversationMap.has(convId)) {
+        conversationMap.set(convId, {
+          conversation_id: convId,
+          messages: [],
+          last_message: notification,
+          unread_count: 0,
+          participant: notification.sender_id?.toString() === req.user._id.toString()
+            ? notification.receiver_id
+            : notification.sender_id
+        });
+      }
+
+      const conversation = conversationMap.get(convId);
+      conversation.messages.push(notification);
+      
+      // Update last message if this one is newer
+      if (new Date(notification.createdAt) > new Date(conversation.last_message.createdAt)) {
+        conversation.last_message = notification;
+      }
+
+      // Count unread messages
+      if (!notification.is_read && notification.receiver_id?.toString() === req.user._id.toString()) {
+        conversation.unread_count++;
+      }
+    }
+
+    // Convert map to array and sort by last message time
+    const conversations = Array.from(conversationMap.values())
+      .sort((a, b) => new Date(b.last_message.createdAt) - new Date(a.last_message.createdAt));
+
+    res.json({
+      total: conversations.length,
+      conversations
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // ==================== AUDIT LOGS ====================
 
 /**
@@ -1825,6 +2413,171 @@ exports.getPatientById = async (req, res, next) => {
     }).populate('requested_by', 'full_name');
 
     res.json({ patient, orderHistory: orders });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ==================== FEEDBACK METHODS ====================
+
+/**
+ * @desc    Provide Feedback
+ * @route   POST /api/owner/feedback
+ * @access  Private (Owner)
+ */
+exports.provideFeedback = async (req, res, next) => {
+  try {
+    const owner_id = req.user._id;
+    const { target_type, target_id, rating, message, is_anonymous } = req.body;
+
+    // Validate required fields
+    if (!target_type || !rating) {
+      return res.status(400).json({ message: '⚠️ Target type and rating are required' });
+    }
+
+    // Validate target_type
+    const validTargetTypes = ['lab', 'test', 'order', 'system'];
+    if (!validTargetTypes.includes(target_type)) {
+      return res.status(400).json({ message: '⚠️ Invalid target type. Must be lab, test, order, or system' });
+    }
+
+    // For non-system feedback, target_id is required
+    if (target_type !== 'system' && !target_id) {
+      return res.status(400).json({ message: '⚠️ Target ID is required for non-system feedback' });
+    }
+
+    // Validate rating (1-5)
+    if (rating < 1 || rating > 5) {
+      return res.status(400).json({ message: '⚠️ Rating must be between 1 and 5' });
+    }
+
+    // Validate target exists and owner has access (skip for system feedback)
+    let targetExists = target_type === 'system';
+    let targetOwnerId = null;
+
+    if (target_type !== 'system') {
+      switch (target_type) {
+        case 'lab':
+          const lab = await LabOwner.findById(target_id);
+          if (lab) {
+            targetExists = true;
+            targetOwnerId = lab._id;
+          }
+          break;
+        case 'test':
+          const test = await Test.findById(target_id);
+          if (test && test.owner_id.toString() === owner_id.toString()) {
+            targetExists = true;
+            targetOwnerId = test.owner_id;
+          }
+          break;
+        case 'order':
+          const order = await Order.findOne({
+            _id: target_id,
+            owner_id: owner_id
+          });
+          if (order) {
+            targetExists = true;
+            targetOwnerId = order.owner_id;
+          }
+          break;
+      }
+
+      if (!targetExists) {
+        return res.status(404).json({ message: '❌ Target not found or access denied' });
+      }
+    }
+
+    // Create feedback
+    const feedback = new Feedback({
+      user_id: owner_id,
+      user_model: 'Owner',
+      target_type,
+      target_id: target_type === 'system' ? null : target_id,
+      rating,
+      message: message || '',
+      is_anonymous: is_anonymous || false
+    });
+
+    await feedback.save();
+
+    // Send notification to lab owner (skip for system feedback or self-feedback)
+    if (targetOwnerId && targetOwnerId.toString() !== owner_id.toString()) {
+      await Notification.create({
+        sender_id: owner_id,
+        sender_model: 'Owner',
+        receiver_id: targetOwnerId,
+        receiver_model: 'Owner',
+        type: 'feedback',
+        title: '⭐ New Feedback Received',
+        message: `Lab owner provided ${rating}-star feedback on your ${target_type}`
+      });
+    }
+
+    res.status(201).json({
+      message: '✅ Feedback submitted successfully',
+      feedback: {
+        _id: feedback._id,
+        rating: feedback.rating,
+        message: feedback.message,
+        is_anonymous: feedback.is_anonymous,
+        createdAt: feedback.createdAt
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get My Feedback History
+ * @route   GET /api/owner/feedback
+ * @access  Private (Owner)
+ */
+exports.getMyFeedback = async (req, res, next) => {
+  try {
+    const owner_id = req.user._id;
+    const { page = 1, limit = 10, target_type } = req.query;
+
+    const query = {
+      user_id: owner_id,
+      user_model: 'Owner'
+    };
+
+    if (target_type) {
+      query.target_type = target_type;
+    }
+
+    const feedback = await Feedback.find(query)
+      .populate({
+        path: 'target_id',
+        select: 'name lab_name test_name barcode',
+        model: function(doc) {
+          switch (doc.target_type) {
+            case 'lab': return 'Owner';
+            case 'test': return 'Test';
+            case 'order': return 'Order';
+            case 'system': return null; // System feedback has no specific target
+            default: return null;
+          }
+        }
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Feedback.countDocuments(query);
+
+    res.json({
+      success: true,
+      feedbacks: feedback,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
   } catch (err) {
     next(err);
   }

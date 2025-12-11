@@ -21,7 +21,10 @@ exports.applyDiscount = async (req, res) => {
     invoice.total_amount = invoice.subtotal - discount;
     await invoice.save();
 
-    await logAction(req.user?._id, `Applied discount of ${discount} to invoice ${invoiceId}`);
+    const Staff = require('../models/Staff');
+    const loggingStaff = await Staff.findById(req.user?._id).select('username');
+
+    await logAction(req.user?._id, loggingStaff.username, `Applied discount of ${discount} to invoice ${invoiceId}`);
 
     res.json({ message: "Discount applied", invoice });
   } catch (err) {
@@ -135,8 +138,10 @@ exports.recordPayment = async (req, res) => {
     }
 
     // Log action
+    const loggingStaff = await Staff.findById(staff_id).select('username');
     await logAction(
       staff_id,
+      loggingStaff.username,
       `Recorded payment of ${amount_paid} (${payment_method}) for invoice ${updatedInvoice._id}`,
       'Invoice',
       updatedInvoice._id,
