@@ -12,6 +12,27 @@ class StaffApiService {
     });
   }
 
+  // Profile
+  static Future<Map<String, dynamic>> getProfile() async {
+    return await ApiService.get('/staff/profile');
+  }
+
+  static Future<Map<String, dynamic>> updateProfile(
+    Map<String, dynamic> profileData,
+  ) async {
+    return await ApiService.put('/staff/profile', profileData);
+  }
+
+  static Future<Map<String, dynamic>> changePassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
+    return await ApiService.put('/staff/change-password', {
+      'current_password': currentPassword,
+      'new_password': newPassword,
+    });
+  }
+
   // Dashboard & Assigned Tests
   static Future<Map<String, dynamic>> getMyAssignedTests({
     String? statusFilter,
@@ -28,6 +49,31 @@ class StaffApiService {
     }
 
     return await ApiService.get(url);
+  }
+
+  // Get all tests available in the staff's lab
+  static Future<Map<String, dynamic>> getLabTests() async {
+    return await ApiService.get('/staff/lab-tests');
+  }
+
+  // Assign staff to a specific test
+  static Future<Map<String, dynamic>> assignToTest({
+    required String detailId,
+  }) async {
+    return await ApiService.post('/staff/assign-to-test', {
+      'detail_id': detailId,
+    });
+  }
+
+  // Create walk-in order
+  static Future<Map<String, dynamic>> createWalkInOrder({
+    required Map<String, dynamic> patientInfo,
+    required List<String> testIds,
+  }) async {
+    return await ApiService.post('/staff/create-walk-in-order', {
+      'patient_info': patientInfo,
+      'test_ids': testIds,
+    });
   }
 
   // Get pending orders for barcode generation
@@ -78,14 +124,21 @@ class StaffApiService {
   // Result Upload
   static Future<Map<String, dynamic>> uploadResult({
     required String detailId,
-    required String resultValue,
+    String? resultValue,
+    List<Map<String, dynamic>>? components,
     String? remarks,
   }) async {
     return await ApiService.post('/staff/upload-result', {
       'detail_id': detailId,
-      'result_value': resultValue,
+      if (resultValue != null) 'result_value': resultValue,
+      if (components != null) 'components': components,
       if (remarks != null) 'remarks': remarks,
     });
+  }
+
+  // Get test components (for multi-component tests)
+  static Future<Map<String, dynamic>> getTestComponents(String testId) async {
+    return await ApiService.get('/staff/tests/$testId/components');
   }
 
   // Notifications
@@ -164,5 +217,55 @@ class StaffApiService {
         .join('&');
 
     return await ApiService.get('/staff/feedback?$queryString');
+  }
+
+  // Results & Invoices
+  static Future<Map<String, dynamic>> getAllResults({
+    int page = 1,
+    int limit = 50,
+    String? startDate,
+    String? endDate,
+    String? status,
+    String? patientName,
+    String? testName,
+  }) async {
+    final queryParams = <String, String>{};
+    queryParams['page'] = page.toString();
+    queryParams['limit'] = limit.toString();
+
+    if (startDate != null) queryParams['startDate'] = startDate;
+    if (endDate != null) queryParams['endDate'] = endDate;
+    if (status != null) queryParams['status'] = status;
+    if (patientName != null) queryParams['patientName'] = patientName;
+    if (testName != null) queryParams['testName'] = testName;
+
+    return await ApiService.get('/staff/results', params: queryParams);
+  }
+
+  static Future<Map<String, dynamic>> getAllInvoices({
+    int page = 1,
+    int limit = 50,
+    String? startDate,
+    String? endDate,
+    String? status,
+    String? patientName,
+  }) async {
+    final queryParams = <String, String>{};
+    queryParams['page'] = page.toString();
+    queryParams['limit'] = limit.toString();
+
+    if (startDate != null) queryParams['startDate'] = startDate;
+    if (endDate != null) queryParams['endDate'] = endDate;
+    if (status != null) queryParams['status'] = status;
+    if (patientName != null) queryParams['patientName'] = patientName;
+
+    return await ApiService.get('/staff/invoices', params: queryParams);
+  }
+
+  // Test Assignment
+  static Future<Map<String, dynamic>> assignTestToMe(String detailId) async {
+    return await ApiService.post('/staff/assign-test-to-me', {
+      'detail_id': detailId,
+    });
   }
 }

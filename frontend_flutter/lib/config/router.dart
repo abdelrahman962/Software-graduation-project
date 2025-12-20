@@ -4,13 +4,17 @@ import '../screens/marketing/home_screen.dart';
 import '../screens/marketing/about_screen.dart';
 import '../screens/marketing/services_screen.dart';
 import '../screens/marketing/contact_screen.dart';
+import '../screens/marketing/owner_registration_screen.dart';
 import '../screens/common/merged_login_screen.dart';
 import '../screens/public/public_registration_screen.dart';
 import '../screens/public/lab_finder_screen.dart';
 import '../screens/admin/admin_dashboard_screen.dart';
 import '../screens/staff/staff_dashboard_screen.dart';
+import '../screens/staff/staff_result_reports_screen.dart';
+import '../screens/staff/staff_invoice_reports_screen.dart';
 import '../screens/patient/patient_dashboard_screen.dart';
 import '../screens/patient/patient_order_report_screen.dart';
+import '../screens/patient/patient_bill_details_screen.dart';
 import '../screens/doctor/doctor_dashboard_screen.dart';
 import '../screens/doctor/patient_details_screen.dart';
 import '../screens/doctor/doctor_feedback_screen.dart';
@@ -22,6 +26,8 @@ import '../screens/owner/owner_dashboard_screen.dart';
 import '../screens/owner/inventory_management_screen.dart';
 import '../screens/owner/owner_order_management_screen.dart';
 import '../screens/owner/reports_screen.dart';
+import '../screens/owner/owner_result_reports_screen.dart';
+import '../screens/owner/owner_invoice_reports_screen.dart';
 import '../screens/owner/notifications_screen.dart';
 import '../screens/owner/audit_logs_screen.dart';
 
@@ -49,6 +55,11 @@ class AppRouter {
         path: '/contact',
         name: 'contact',
         builder: (context, state) => const ContactScreen(),
+      ),
+      GoRoute(
+        path: '/register-owner',
+        name: 'register-owner',
+        builder: (context, state) => const OwnerRegistrationScreen(),
       ),
 
       // Admin Routes
@@ -80,6 +91,20 @@ class AppRouter {
         builder: (context, state) => const StaffFeedbackScreen(),
       ),
 
+      // Staff Result Reports Route
+      GoRoute(
+        path: '/staff/result-reports',
+        name: 'staff-result-reports',
+        builder: (context, state) => const StaffResultReportsScreen(),
+      ),
+
+      // Staff Invoice Reports Route
+      GoRoute(
+        path: '/staff/invoice-reports',
+        name: 'staff-invoice-reports',
+        builder: (context, state) => const StaffInvoiceReportsScreen(),
+      ),
+
       // Patient Dashboard Route
       GoRoute(
         path: '/patient-dashboard',
@@ -93,6 +118,15 @@ class AppRouter {
             builder: (context, state) {
               final orderId = state.pathParameters['orderId']!;
               return PatientOrderReportScreen(orderId: orderId);
+            },
+          ),
+          // Patient Bill Details Route
+          GoRoute(
+            path: 'bill-details/:orderId',
+            name: 'patient-bill-details',
+            builder: (context, state) {
+              final orderId = state.pathParameters['orderId']!;
+              return PatientBillDetailsScreen(orderId: orderId);
             },
           ),
         ],
@@ -183,11 +217,18 @@ class AppRouter {
         builder: (context, state) => const OwnerOrderManagementScreen(),
       ),
 
-      // Owner Reports Route
+      // Owner Result Reports Route
       GoRoute(
-        path: '/owner/reports',
-        name: 'owner-reports',
-        builder: (context, state) => const ReportsScreen(),
+        path: '/owner/result-reports',
+        name: 'owner-result-reports',
+        builder: (context, state) => const OwnerResultReportsScreen(),
+      ),
+
+      // Owner Invoice Reports Route
+      GoRoute(
+        path: '/owner/invoice-reports',
+        name: 'owner-invoice-reports',
+        builder: (context, state) => const OwnerInvoiceReportsScreen(),
       ),
 
       // Owner Notifications Route

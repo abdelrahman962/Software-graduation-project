@@ -134,6 +134,15 @@ class _PatientSidebarState extends State<PatientSidebar> {
                     badge: null,
                   ),
                 ]),
+
+                _buildNavSection('ACCOUNT', [
+                  _buildNavItem(
+                    icon: Icons.person,
+                    title: 'My Profile',
+                    index: 2,
+                    badge: null,
+                  ),
+                ]),
               ],
             ),
           ),

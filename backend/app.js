@@ -49,11 +49,16 @@ app.use('/api/owner', require('./routes/ownerRoutes'));
 app.use('/api/patient', require('./routes/patientRoutes'));
 app.use('/api/staff', require('./routes/staffRoutes'));
 app.use('/api/doctor', require('./routes/doctorRoutes'));
-app.use('/api/invoice', require('./routes/invoiceRoutes')); // Invoice & payment endpoints
-
+app.use('/api/invoice', require('./routes/invoiceRoutes')); // Invoice & payment endpointsapp.use('/api/whatsapp', require('./routes/whatsappRoutes')); // WhatsApp webhook
 // Error Middleware
 app.use((err, req, res, next) => {
-  logger.error('Unhandled error', { error: err.message, stack: err.stack });
+  logger.error('Unhandled error', { 
+    error: err.message, 
+    stack: err.stack,
+    url: req.url,
+    method: req.method 
+  });
+  console.error('ERROR DETAILS:', err); // Add console log for debugging
   res.status(500).json({ message: err.message });
 });
 

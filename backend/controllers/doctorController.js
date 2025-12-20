@@ -12,6 +12,7 @@ const Feedback = require('../models/Feedback');
 const jwt = require('jsonwebtoken');
 const sendEmail = require('../utils/sendEmail');
 const sendSMS = require('../utils/sendSMS');
+const { sendWhatsAppMessage } = require('../utils/sendWhatsApp');
 
 // ✅ Doctor Login
 exports.loginDoctor = async (req, res) => {
@@ -24,6 +25,93 @@ exports.loginDoctor = async (req, res) => {
 
     const token = jwt.sign({ id: doctor._id, role: 'Doctor' }, process.env.JWT_SECRET, { expiresIn: '7d' });
     res.json({ message: 'Login successful', token, doctor });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// ✅ Get Doctor Profile
+exports.getProfile = async (req, res, next) => {
+  try {
+    const doctor = await Doctor.findById(req.user._id).select('-password');
+    
+    if (!doctor) {
+      return res.status(404).json({ message: '❌ Doctor not found' });
+    }
+
+    res.json(doctor);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ✅ Update Doctor Profile
+exports.updateProfile = async (req, res, next) => {
+  try {
+    const {
+      name,
+      phone_number,
+      email,
+      identity_number,
+      birthday,
+      gender
+    } = req.body;
+
+    const doctor = await Doctor.findById(req.user._id);
+    if (!doctor) {
+      return res.status(404).json({ message: '❌ Doctor not found' });
+    }
+
+    // Update allowed fields
+    if (name) doctor.name = name;
+    if (phone_number) doctor.phone_number = phone_number;
+    if (email) doctor.email = email;
+    if (identity_number) doctor.identity_number = identity_number;
+    if (birthday) doctor.birthday = birthday;
+    if (gender) doctor.gender = gender;
+
+    await doctor.save();
+
+    res.json({ 
+      message: '✅ Profile updated successfully', 
+      doctor: await Doctor.findById(doctor._id).select('-password')
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ✅ Change Doctor Password
+exports.changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    // Validate input
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: '⚠️ Current password and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: '⚠️ New password must be at least 6 characters long' });
+    }
+
+    // Find doctor
+    const doctor = await Doctor.findById(req.user.id);
+    if (!doctor) {
+      return res.status(404).json({ message: '❌ Doctor not found' });
+    }
+
+    // Verify current password
+    const isMatch = await doctor.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(401).json({ message: '❌ Current password is incorrect' });
+    }
+
+    // Update password
+    doctor.password = newPassword;
+    await doctor.save();
+
+    res.json({ message: '✅ Password changed successfully' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -111,8 +199,28 @@ exports.requestTestForPatient = async (req, res) => {
       subtotal,
       discount: 0,
       total_amount: subtotal,
-      payment_status: 'pending',
-      owner_id
+      payment_status: 'paid', // Mark as paid initially
+      payment_method: 'cash', // Default payment method
+      payment_date: new Date(),
+      paid_by: doctor_id,
+      owner_id,
+      items: tests.map(t => ({
+        test_id: t._id,
+        test_name: t.test_name,
+        price: t.price,
+        quantity: 1
+      }))
+    }], { session });
+
+    // Send invoice notification to patient
+    await Notification.create([{
+      sender_id: doctor_id,
+      sender_model: 'Doctor',
+      receiver_id: patient._id,
+      receiver_model: 'Patient',
+      type: 'invoice',
+      title: 'Invoice Generated',
+      message: `Your invoice for tests ordered by Dr. ${req.user.username || 'your doctor'} has been generated. Total: ${subtotal} ILS. Payment status: Paid.`
     }], { session });
 
     // Send notification to patient
@@ -183,8 +291,22 @@ Best regards,
 MedLab System
     `;
 
-    await sendEmail(patient.email, emailSubject, emailMessage);
-    await sendSMS(patient.phone_number, `Dr. ${req.user.username} ordered ${test_ids.length} test(s) for you${is_urgent ? ' (URGENT)' : ''}. Visit ${lab.lab_name} for sample collection. Tests: ${tests.map(t => t.test_name).join(', ')}`);
+    // Send WhatsApp notification to patient (with email fallback)
+    const whatsappMessage = `Hello ${patient.full_name.first},\n\nDr. ${req.user.username || 'Your doctor'} has ordered ${test_ids.length} test(s) for you${is_urgent ? ' (URGENT)' : ''}.\n\nLab: ${lab.lab_name}\nTests: ${tests.map(t => t.test_name).join(', ')}\nTotal Cost: ${subtotal} ILS\n\nNext Steps:\n1. Visit ${lab.lab_name} at your earliest convenience\n2. Bring your ID for verification\n3. Sample will be collected and processed\n4. Results will be available in your account\n\n${is_urgent ? '⚠️ This is an URGENT test request. Please visit the lab immediately.' : ''}\n\nLab Contact: ${lab.phone_number}\n\nBest regards,\nMedLab System`;
+
+    const whatsappSuccess = await sendWhatsAppMessage(
+      patient.phone_number,
+      whatsappMessage,
+      [],
+      true, // fallback to email
+      emailSubject,
+      emailMessage
+    );
+
+    if (!whatsappSuccess) {
+      // Fallback to SMS if both WhatsApp and email fail
+      await sendSMS(patient.phone_number, `Dr. ${req.user.username} ordered ${test_ids.length} test(s) for you${is_urgent ? ' (URGENT)' : ''}. Visit ${lab.lab_name} for sample collection. Tests: ${tests.map(t => t.test_name).join(', ')}`);
+    }
 
     res.status(201).json({
       success: true,
@@ -298,10 +420,10 @@ exports.getPatientTestHistory = async (req, res) => {
 // ✅ Mark Test Order as Urgent
 exports.markTestUrgent = async (req, res) => {
   try {
-    const { order_id } = req.params;
+    const { orderId } = req.params;
     const doctor_id = req.user.id;
 
-    const order = await Order.findById(order_id);
+    const order = await Order.findById(orderId);
     if (!order) return res.status(404).json({ message: 'Order not found' });
 
     // Verify doctor has access to this order
@@ -705,6 +827,20 @@ exports.provideFeedback = async (req, res) => {
         return res.status(404).json({ message: 'Target not found' });
       }
 
+    // Check for 28-day cooldown (users can submit feedback every 4 weeks)
+    const twentyEightDaysAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
+    const lastFeedback = await Feedback.findOne({
+      user_id: doctor_id,
+      createdAt: { $gte: twentyEightDaysAgo }
+    }).sort({ createdAt: -1 });
+
+    if (lastFeedback) {
+      const daysUntilNext = Math.ceil((lastFeedback.createdAt.getTime() + 28 * 24 * 60 * 60 * 1000 - Date.now()) / (24 * 60 * 60 * 1000));
+      return res.status(429).json({
+        message: `⏳ You can submit feedback again in ${daysUntilNext} days. Feedback is limited to once every 4 weeks.`
+      });
+    }
+
       const feedback = await Feedback.create({
         user_id: doctor_id,
         user_model: 'Doctor',
@@ -881,10 +1017,10 @@ exports.getPatientOrdersWithResults = async (req, res) => {
 exports.getOrderResults = async (req, res) => {
   try {
     const doctor_id = req.user.id;
-    const { order_id } = req.params;
+    const { orderId } = req.params;
 
     // Get the order and verify it belongs to this doctor
-    const order = await Order.findOne({ _id: order_id, doctor_id: doctor_id })
+    const order = await Order.findOne({ _id: orderId, doctor_id: doctor_id })
       .populate('patient_id', 'full_name identity_number birthday gender phone_number email address')
       .populate('owner_id', 'name address phone_number email');
 

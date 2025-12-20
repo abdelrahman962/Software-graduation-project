@@ -78,7 +78,7 @@ class _MergedLoginScreenState extends State<MergedLoginScreen> {
             );
             await authProvider.loadAuthState();
             break;
-          case 'staff':
+          case 'Staff':
             await prefs.setString('staff_token', token);
             await prefs.setString('staff_id', userData['_id']);
             await prefs.setString('staff_email', userData['email'] ?? '');

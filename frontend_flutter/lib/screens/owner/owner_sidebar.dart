@@ -73,17 +73,10 @@ class OwnerSidebar extends StatelessWidget {
                     _buildNavItem(context, 'Tests', Icons.science, 4),
                     _buildNavItem(context, 'Devices', Icons.devices, 5),
                     _buildNavItem(context, 'Inventory', Icons.inventory, 6),
-                    _buildNavItem(context, 'Reports', Icons.analytics, 7),
-                    _buildNavItem(context, 'Audit Logs', Icons.history, 8),
+                    _buildNavItem(context, 'Audit Logs', Icons.history, 7),
                   ]),
                   _buildNavSection(context, 'SYSTEM', [
-                    // _buildNavItem(
-                    //   context,
-                    //   'Settings',
-                    //   Icons.settings,
-                    //   -1,
-                    //   onTap: () => context.go('/owner/settings'),
-                    // ),
+                    _buildNavItem(context, 'My Profile', Icons.person, 8),
                     _buildNavItem(
                       context,
                       'Logout',

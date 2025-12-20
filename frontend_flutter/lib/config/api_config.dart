@@ -1,7 +1,7 @@
 class ApiConfig {
   // Base URL - Update this to your backend URL
   // For mobile testing, use your computer's IP address instead of localhost
-  static const String baseUrl = 'http://192.168.1.4:5000/api';
+  static const String baseUrl = 'http://localhost:5000/api';
 
   // Admin Authentication
   static const String adminLogin = '/admin/login';

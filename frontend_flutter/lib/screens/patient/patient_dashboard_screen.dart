@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter_animate/flutter_animate.dart';
+import 'package:intl/intl.dart';
+import 'dart:math';
 import '../../providers/patient_auth_provider.dart';
 import '../../services/patient_api_service.dart';
-import '../../services/api_service.dart';
 import '../../config/theme.dart';
-import '../../config/api_config.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/system_feedback_form.dart';
+import 'patient_profile_screen.dart';
+import 'patient_order_report_screen.dart';
+import '../../utils/responsive_utils.dart';
 
 class PatientDashboardScreen extends StatefulWidget {
   const PatientDashboardScreen({super.key});
@@ -66,8 +68,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
         });
       }
     } catch (e) {
-      print('Error loading orders: $e');
-
       // Try fallback to old endpoint if new one doesn't exist yet
       try {
         final fallbackResponse = await PatientApiService.getMyOrders();
@@ -79,7 +79,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
           });
         }
       } catch (fallbackError) {
-        print('Fallback also failed: $fallbackError');
         if (mounted) {
           setState(() {
             _orders = [];
@@ -116,7 +115,61 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
     }
 
     if (_isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        appBar: AppBar(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          elevation: 0,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ResponsiveText(
+                'Patient Dashboard',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              ResponsiveText(
+                'Welcome back, ${authProvider.user?.fullName?.first ?? authProvider.user?.email ?? 'Patient'}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Colors.grey[600],
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            AppAnimations.bounce(
+              IconButton(
+                icon: const Icon(Icons.notifications),
+                onPressed: _showNotificationsDialog,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.person),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const PatientProfileScreen(),
+                  ),
+                );
+              },
+            ),
+            AppAnimations.scaleIn(
+              IconButton(
+                icon: const Icon(Icons.logout),
+                onPressed: () async {
+                  await authProvider.logout();
+                  await Future.delayed(const Duration(milliseconds: 50));
+                  if (mounted) context.go('/');
+                },
+              ),
+              delay: const Duration(milliseconds: 200),
+            ),
+          ],
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
     }
 
     return Scaffold(
@@ -126,13 +179,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            ResponsiveText(
               'Patient Dashboard',
               style: Theme.of(
                 context,
               ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
             ),
-            Text(
+            ResponsiveText(
               'Welcome back, ${authProvider.user?.fullName?.first ?? authProvider.user?.email ?? 'Patient'}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Colors.grey[600],
@@ -148,22 +201,358 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
               onPressed: _showNotificationsDialog,
             ),
           ),
+          IconButton(
+            icon: const Icon(Icons.person),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const PatientProfileScreen(),
+                ),
+              );
+            },
+          ),
           AppAnimations.scaleIn(
             IconButton(
               icon: const Icon(Icons.logout),
               onPressed: () async {
                 await authProvider.logout();
-                // Small delay to ensure logout is complete before navigation
                 await Future.delayed(const Duration(milliseconds: 50));
                 if (mounted) context.go('/');
               },
             ),
-            delay: 200.ms,
+            delay: const Duration(milliseconds: 200),
           ),
         ],
       ),
-      body: _buildResultsTab(authProvider),
+      body: _orders.isEmpty ? _buildEmptyState() : _buildOrdersList(),
     );
+  }
+
+  Widget _buildEmptyState() {
+    return AppAnimations.pageDepthTransition(
+      Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AppAnimations.floating(
+              AppAnimations.morphIn(
+                Icon(
+                  Icons.science_outlined,
+                  size: 80,
+                  color: AppTheme.textLight,
+                ),
+                delay: const Duration(milliseconds: 200),
+              ),
+            ),
+            const SizedBox(height: 16),
+            AppAnimations.blurFadeIn(
+              Text(
+                'No orders yet',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(color: AppTheme.textLight),
+              ),
+              delay: const Duration(milliseconds: 400),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrdersList() {
+    return Stack(
+      children: [
+        ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: _orders.length,
+          itemBuilder: (context, index) {
+            final order = _orders[index];
+            return AppAnimations.slideInFromBottom(
+              _buildOrderCard(order),
+              delay: Duration(milliseconds: index * 100),
+            );
+          },
+        ),
+        if (_showFeedbackReminder)
+          Positioned(
+            bottom: 16,
+            right: 16,
+            child: AppAnimations.bounce(
+              FloatingActionButton(
+                onPressed: _showFeedbackDialog,
+                backgroundColor: AppTheme.primaryBlue,
+                child: const Icon(Icons.feedback, color: Colors.white),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  void _showNotificationsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Notifications'),
+        content: const Text('No new notifications at this time.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOrderCard(dynamic order) {
+    final orderDate = DateTime.parse(order['order_date']);
+    final status = order['status'] ?? 'unknown';
+    final testCount = order['test_count'] ?? 0;
+    final labName = order['owner_id']?['lab_name'] ?? 'Medical Lab';
+
+    Color statusColor;
+    IconData statusIcon;
+
+    switch (status) {
+      case 'completed':
+        statusColor = AppTheme.successGreen;
+        statusIcon = Icons.check_circle;
+        break;
+      case 'processing':
+        statusColor = AppTheme.warningYellow;
+        statusIcon = Icons.hourglass_top;
+        break;
+      case 'pending':
+        statusColor = AppTheme.primaryBlue;
+        statusIcon = Icons.schedule;
+        break;
+      default:
+        statusColor = Colors.grey;
+        statusIcon = Icons.help;
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with date and lab name
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(statusIcon, color: statusColor, size: 24),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        DateFormat('MMM dd, yyyy').format(orderDate),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                      Text(
+                        labName,
+                        style: const TextStyle(
+                          color: AppTheme.textMedium,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    status.toUpperCase(),
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Order info
+            Row(
+              children: [
+                Expanded(
+                  child: _buildInfoItem(
+                    Icons.science,
+                    '$testCount Test${testCount != 1 ? 's' : ''}',
+                    'Medical tests ordered',
+                  ),
+                ),
+                if (order['total_cost'] != null)
+                  Expanded(
+                    child: _buildInfoItem(
+                      Icons.attach_money,
+                      'ILS ${order['total_cost'].toStringAsFixed(2)}',
+                      'Total cost',
+                    ),
+                  ),
+              ],
+            ),
+            if (order['order_details'] != null &&
+                order['order_details'].isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'Tests Ordered:',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: (order['order_details'] as List).take(3).map((
+                  detail,
+                ) {
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      detail['test_name'] ?? 'Unknown Test',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppTheme.textMedium,
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              if ((order['order_details'] as List).length > 3)
+                Text(
+                  '+${(order['order_details'] as List).length - 3} more tests',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.textMedium,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+            ],
+            const SizedBox(height: 20),
+            // Action buttons
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _showOrderResults(order),
+                    icon: const Icon(Icons.science, size: 18),
+                    label: const Text('View Results'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryBlue,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showOrderBill(order),
+                    icon: const Icon(Icons.receipt_long, size: 18),
+                    label: const Text('View Bill'),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppTheme.primaryBlue),
+                      foregroundColor: AppTheme.primaryBlue,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoItem(IconData icon, String value, String label) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: AppTheme.primaryBlue),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textMedium,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showOrderResults(dynamic order) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            PatientOrderReportScreen(orderId: order['order_id']),
+      ),
+    );
+  }
+
+  void _showOrderBill(dynamic order) async {
+    // Navigate to bill details screen
+    GoRouter.of(
+      context,
+    ).push('/patient-dashboard/bill-details/${order['order_id']}');
   }
 
   void _showFeedbackDialog() {
@@ -181,14 +570,10 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
             );
             if (mounted) {
               Navigator.pop(context);
-              setState(() {
-                _hasFeedbackSubmitted = true;
-                _showFeedbackReminder = false;
-              });
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('Thank you for your feedback!'),
-                  backgroundColor: Colors.green,
+                  backgroundColor: AppTheme.successGreen,
                 ),
               );
             }
@@ -206,574 +591,773 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
       ),
     );
   }
+}
 
-  Widget _buildResultsTab(PatientAuthProvider authProvider) {
-    if (_orders.isEmpty) {
-      return AppAnimations.pageDepthTransition(
-        Center(
+class _OrderDetailsModal extends StatefulWidget {
+  final dynamic order;
+  final dynamic invoice;
+  final ScrollController scrollController;
+  final bool initialShowResults;
+
+  const _OrderDetailsModal({
+    required this.order,
+    this.invoice,
+    required this.scrollController,
+    this.initialShowResults = true,
+  });
+
+  @override
+  State<_OrderDetailsModal> createState() => _OrderDetailsModalState();
+}
+
+class _OrderDetailsModalState extends State<_OrderDetailsModal> {
+  late bool _showTestResults; // true = Test Results, false = Bill Details
+
+  @override
+  void initState() {
+    super.initState();
+    _showTestResults = widget.initialShowResults;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final order = widget.order;
+    final status = order['status'] ?? 'unknown';
+
+    Color statusColor;
+    switch (status) {
+      case 'completed':
+        statusColor = AppTheme.successGreen;
+        break;
+      case 'processing':
+        statusColor = AppTheme.warningYellow;
+        break;
+      case 'pending':
+        statusColor = AppTheme.primaryBlue;
+        break;
+      default:
+        statusColor = Colors.grey;
+    }
+
+    return Column(
+      children: [
+        // Header
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              AppAnimations.floating(
-                AppAnimations.morphIn(
-                  Icon(
-                    Icons.science_outlined,
-                    size: 80,
-                    color: AppTheme.textLight,
-                  ),
-                  delay: 200.ms,
+              // Handle
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
               const SizedBox(height: 16),
-              AppAnimations.blurFadeIn(
-                Text(
-                  'No orders yet',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(color: AppTheme.textLight),
-                ),
-                delay: 400.ms,
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return AppAnimations.pageDepthTransition(
-      SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            if (_showFeedbackReminder)
-              AppAnimations.elasticSlideIn(
-                _buildFeedbackReminderBanner(),
-                delay: 50.ms,
-              ),
-            if (_showFeedbackReminder) const SizedBox(height: 16),
-
-            // Title
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Row(
+              // Title and toggle
+              Row(
                 children: [
-                  Icon(Icons.assignment, color: AppTheme.primaryBlue, size: 28),
-                  const SizedBox(width: 12),
-                  Text(
-                    'My Laboratory Orders',
-                    style: AppTheme.medicalTextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.textDark,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Order Cards
-            ..._orders.asMap().entries.map((entry) {
-              final index = entry.key;
-              final order = entry.value;
-              return AppAnimations.slideInFromRight(
-                _buildOrderCard(order),
-                delay: Duration(milliseconds: 100 * index),
-              );
-            }),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOrderCard(Map<String, dynamic> order) {
-    final orderId = order['order_id'];
-    final barcode = order['barcode'] ?? 'N/A';
-    final orderDate = order['order_date']?.substring(0, 10) ?? 'N/A';
-    final doctorName = order['doctor_name'] ?? 'Not assigned';
-    final totalTests = order['total_tests'] ?? 0;
-    final completedTests = order['completed_tests'] ?? 0;
-    final inProgressTests = order['in_progress_tests'] ?? 0;
-    final pendingTests = order['pending_tests'] ?? 0;
-    final hasResults = order['has_results'] ?? false;
-
-    // Determine card status color
-    Color statusColor;
-    String statusText;
-    if (completedTests == totalTests) {
-      statusColor = AppTheme.successGreen;
-      statusText = 'All tests completed';
-    } else if (inProgressTests > 0) {
-      statusColor = AppTheme.warningYellow;
-      statusText = '$inProgressTests test(s) in progress';
-    } else {
-      statusColor = AppTheme.primaryBlue;
-      statusText = '$pendingTests test(s) pending';
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: AnimatedCard(
-        child: InkWell(
-          onTap: hasResults
-              ? () {
-                  context.go('/patient-dashboard/order-report/$orderId');
-                }
-              : null,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: statusColor.withValues(alpha: 0.3),
-                width: 2,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header row
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: statusColor.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(
-                        Icons.assignment,
-                        color: statusColor,
-                        size: 24,
+                  Expanded(
+                    child: Text(
+                      _showTestResults ? 'Test Results' : 'Bill Details',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textDark,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Order #$barcode',
-                            style: AppTheme.medicalTextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.textDark,
-                            ),
-                          ),
-                          Text(
-                            orderDate,
-                            style: AppTheme.medicalTextStyle(
-                              fontSize: 13,
-                              color: AppTheme.textMedium,
-                            ),
-                          ),
-                        ],
-                      ),
+                  ),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(20),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: statusColor,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Text(
-                        '$completedTests/$totalTests',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 12),
-
-                // Status indicator
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: statusColor.withValues(alpha: 0.2),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        completedTests == totalTests
-                            ? Icons.check_circle
-                            : (inProgressTests > 0
-                                  ? Icons.pending
-                                  : Icons.schedule),
-                        color: statusColor,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          statusText,
-                          style: AppTheme.medicalTextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: statusColor,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                // Doctor info
-                Row(
-                  children: [
-                    Icon(
-                      Icons.person_outline,
-                      size: 16,
-                      color: AppTheme.textMedium,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        doctorName,
-                        style: AppTheme.medicalTextStyle(
-                          fontSize: 13,
-                          color: AppTheme.textMedium,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                if (hasResults) ...[
-                  const SizedBox(height: 12),
-                  const Divider(),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Text(
-                        'View Report',
-                        style: AppTheme.medicalTextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.primaryBlue,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        Icons.arrow_forward,
-                        color: AppTheme.primaryBlue,
-                        size: 18,
-                      ),
-                    ],
-                  ),
-                ] else ...[
-                  const SizedBox(height: 12),
-                  const Divider(),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Text(
-                        'No results available yet',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: AppTheme.textLight,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFeedbackReminderBanner() {
-    return AnimatedCard(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              AppTheme.primaryBlue.withValues(alpha: 0.1),
-              AppTheme.secondaryTeal.withValues(alpha: 0.1),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: AppTheme.primaryBlue.withValues(alpha: 0.3),
-            width: 2,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryBlue.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(
-                Icons.feedback_outlined,
-                color: AppTheme.primaryBlue,
-                size: 32,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Share Your Experience',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.primaryBlue,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Help us improve by sharing your feedback about the system',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Column(
-              children: [
-                ElevatedButton.icon(
-                  onPressed: () => _showFeedbackDialog(),
-                  icon: const Icon(Icons.rate_review, size: 18),
-                  label: const Text('Provide Feedback'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryBlue,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: () {
-                    setState(() {
-                      _showFeedbackReminder = false;
-                    });
-                  },
-                  child: const Text(
-                    'Remind me later',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showNotificationsDialog() async {
-    try {
-      final response = await PatientApiService.getNotifications();
-      final notifications = response['notifications'] as List? ?? [];
-      final total = response['count'] ?? notifications.length;
-
-      if (!mounted) return;
-
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Row(
-            children: [
-              const Icon(Icons.notifications, color: AppTheme.primaryBlue),
-              const SizedBox(width: 8),
-              Text('Notifications (${total})'),
-            ],
-          ),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 400,
-            child: notifications.isNotEmpty
-                ? ListView.builder(
-                    itemCount: notifications.length,
-                    itemBuilder: (context, index) {
-                      final notification = notifications[index];
-                      final isRead = notification['is_read'] ?? false;
-                      IconData icon;
-
-                      switch (notification['type']) {
-                        case 'urgent':
-                          icon = Icons.warning;
-                          break;
-                        case 'info':
-                          icon = Icons.info;
-                          break;
-                        case 'success':
-                          icon = Icons.check_circle;
-                          break;
-                        default:
-                          icon = Icons.notifications;
-                      }
-
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: ListTile(
-                          leading: Icon(
-                            icon,
-                            color: isRead ? Colors.grey : AppTheme.primaryBlue,
-                          ),
-                          title: SelectableText(
-                            notification['title'] ?? 'Notification',
-                            style: TextStyle(
-                              fontWeight: isRead
-                                  ? FontWeight.normal
-                                  : FontWeight.bold,
-                            ),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SelectableText(notification['message'] ?? ''),
-                              const SizedBox(height: 4),
-                              Text(
-                                notification['created_at'] != null
-                                    ? _formatDate(notification['created_at'])
-                                    : '',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                            ],
-                          ),
-                          trailing: !isRead
-                              ? IconButton(
-                                  icon: const Icon(Icons.mark_email_read),
-                                  onPressed: () async {
-                                    try {
-                                      await ApiService.put(
-                                        '${ApiConfig.patientNotifications}/${notification['_id']}/read',
-                                        {},
-                                      );
-                                      setState(() {
-                                        notifications[index]['is_read'] = true;
-                                      });
-                                    } catch (e) {
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            'Failed to mark as read: $e',
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  },
-                                )
-                              : null,
-                          onTap: !isRead
-                              ? () async {
-                                  try {
-                                    await ApiService.put(
-                                      '${ApiConfig.patientNotifications}/${notification['_id']}/read',
-                                      {},
-                                    );
-                                    setState(() {
-                                      notifications[index]['is_read'] = true;
-                                    });
-                                  } catch (e) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          'Failed to mark as read: $e',
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                }
-                              : null,
-                        ),
-                      );
-                    },
-                  )
-                : const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    child: Row(
                       children: [
-                        Icon(
-                          Icons.notifications_none,
-                          size: 64,
-                          color: Colors.grey,
+                        // Test Results Tab
+                        GestureDetector(
+                          onTap: () => setState(() => _showTestResults = true),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _showTestResults
+                                  ? Colors.white
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(20),
+                              boxShadow: _showTestResults
+                                  ? [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.science,
+                                  size: 16,
+                                  color: _showTestResults
+                                      ? statusColor
+                                      : Colors.grey,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Test Results',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: _showTestResults
+                                        ? statusColor
+                                        : Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                        SizedBox(height: 16),
-                        Text(
-                          'No notifications found',
-                          style: TextStyle(color: Colors.grey),
+                        // Bill Details Tab
+                        GestureDetector(
+                          onTap: () => setState(() => _showTestResults = false),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: !_showTestResults
+                                  ? Colors.white
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(20),
+                              boxShadow: !_showTestResults
+                                  ? [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.receipt_long,
+                                  size: 16,
+                                  color: !_showTestResults
+                                      ? statusColor
+                                      : Colors.grey,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Bill Details',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: !_showTestResults
+                                        ? statusColor
+                                        : Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ],
                     ),
                   ),
+                ],
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
         ),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load notifications: $e')),
-        );
+        // Content
+        Expanded(
+          child: Container(
+            color: Colors.grey[50],
+            child: _showTestResults
+                ? _buildTestResultsContent()
+                : _buildBillContent(context),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTestResultsContent() {
+    final order = widget.order;
+    final orderDate = DateTime.parse(order['order_date']);
+    final status = order['status'] ?? 'unknown';
+
+    Color statusColor;
+    switch (status) {
+      case 'completed':
+        statusColor = AppTheme.successGreen;
+        break;
+      case 'processing':
+        statusColor = AppTheme.warningYellow;
+        break;
+      case 'pending':
+        statusColor = AppTheme.primaryBlue;
+        break;
+      default:
+        statusColor = Colors.grey;
+    }
+
+    return ListView(
+      controller: widget.scrollController,
+      padding: const EdgeInsets.all(20),
+      children: [
+        // Order Summary
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.science, color: statusColor, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Order #${order['order_id'].toString().substring(0, min(8, order['order_id'].toString().length)).toUpperCase()}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.textDark,
+                          ),
+                        ),
+                        Text(
+                          DateFormat(
+                            'MMM dd, yyyy • hh:mm a',
+                          ).format(orderDate),
+                          style: const TextStyle(
+                            color: AppTheme.textMedium,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      status.toUpperCase(),
+                      style: TextStyle(
+                        color: statusColor,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (order['order_details'] != null &&
+                  order['order_details'].isNotEmpty) ...[
+                const Text(
+                  'Tests Ordered:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textDark,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...(order['order_details'] as List).map((detail) {
+                  final testName = detail['test_name'] ?? 'Unknown Test';
+                  final result = detail['result'];
+                  final resultComponent = detail['result_component'];
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: _getTestStatusColor(
+                          detail['status'] ?? 'pending',
+                        ).withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                testName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.textDark,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _getTestStatusColor(
+                                  detail['status'] ?? 'pending',
+                                ).withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                (detail['status'] ?? 'pending').toUpperCase(),
+                                style: TextStyle(
+                                  color: _getTestStatusColor(
+                                    detail['status'] ?? 'pending',
+                                  ),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (result != null && resultComponent != null) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Result: ${result['value'] ?? 'N/A'} ${resultComponent['unit'] ?? ''}',
+                                      style: const TextStyle(
+                                        color: AppTheme.textDark,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Range: ${resultComponent['normal_range_min'] ?? 'N/A'} - ${resultComponent['normal_range_max'] ?? 'N/A'} ${resultComponent['unit'] ?? ''}',
+                                      style: const TextStyle(
+                                        color: AppTheme.textMedium,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Icon(
+                                _isResultNormal(result, resultComponent)
+                                    ? Icons.check_circle
+                                    : Icons.warning,
+                                color: _isResultNormal(result, resultComponent)
+                                    ? AppTheme.successGreen
+                                    : AppTheme.errorRed,
+                                size: 20,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBillContent(BuildContext context) {
+    final invoice = widget.invoice;
+    final order = widget.order;
+    final authProvider = Provider.of<PatientAuthProvider>(
+      context,
+      listen: false,
+    );
+
+    if (invoice == null) {
+      return const Center(child: Text('No bill information available'));
+    }
+
+    final invoiceDate = DateTime.parse(
+      invoice['created_at'] ?? order['order_date'],
+    );
+    final paymentStatus = 'paid'; // Bills are always considered paid
+
+    Color paymentColor;
+    IconData paymentIcon;
+
+    switch (paymentStatus) {
+      case 'paid':
+        paymentColor = AppTheme.successGreen;
+        paymentIcon = Icons.check_circle;
+        break;
+      case 'pending':
+        paymentColor = AppTheme.warningYellow;
+        paymentIcon = Icons.schedule;
+        break;
+      case 'overdue':
+        paymentColor = AppTheme.errorRed;
+        paymentIcon = Icons.warning;
+        break;
+      default:
+        paymentColor = Colors.grey;
+        paymentIcon = Icons.help;
+    }
+
+    // Calculate total from order details
+    double totalAmount = 0.0;
+    if (order['order_details'] != null) {
+      for (final detail in order['order_details']) {
+        final price = detail['price'] ?? 0.0;
+        totalAmount += price is num ? price.toDouble() : 0.0;
       }
+    }
+
+    return ListView(
+      controller: widget.scrollController,
+      padding: const EdgeInsets.all(20),
+      children: [
+        // Patient Information
+        Container(
+          padding: const EdgeInsets.all(16),
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Patient Information',
+                style: AppTheme.medicalTextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildInfoRow(
+                'Name',
+                authProvider.user?.fullName != null
+                    ? _getPatientFullName(authProvider.user!)
+                    : authProvider.user?.email ?? 'N/A',
+              ),
+              _buildInfoRow(
+                'ID Number',
+                authProvider.user?.identityNumber ?? 'N/A',
+              ),
+              _buildInfoRow('Gender', authProvider.user?.gender ?? 'N/A'),
+              _buildInfoRow(
+                'Date of Birth',
+                authProvider.user?.birthday != null
+                    ? '${authProvider.user!.birthday!.day.toString().padLeft(2, '0')}/${authProvider.user!.birthday!.month.toString().padLeft(2, '0')}/${authProvider.user!.birthday!.year}'
+                    : 'N/A',
+              ),
+              _buildInfoRow(
+                'Order Date',
+                DateFormat(
+                  'MMM dd, yyyy',
+                ).format(DateTime.parse(order['order_date'])),
+              ),
+            ],
+          ),
+        ),
+
+        // Invoice Summary
+        Container(
+          padding: const EdgeInsets.all(16),
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: paymentColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(paymentIcon, color: paymentColor, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Invoice #${invoice['_id'].toString().substring(0, min(8, invoice['_id'].toString().length)).toUpperCase()}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.textDark,
+                          ),
+                        ),
+                        Text(
+                          DateFormat('MMM dd, yyyy').format(invoiceDate),
+                          style: const TextStyle(
+                            color: AppTheme.textMedium,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: paymentColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      paymentStatus.toUpperCase(),
+                      style: TextStyle(
+                        color: paymentColor,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        // Test Costs
+        Container(
+          padding: const EdgeInsets.all(16),
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Test Costs',
+                style: AppTheme.medicalTextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (order['order_details'] != null &&
+                  order['order_details'].isNotEmpty) ...[
+                ...(order['order_details'] as List).map((detail) {
+                  final testName = detail['test_name'] ?? 'Unknown Test';
+                  final price = detail['price'] ?? 0.0;
+                  final priceDouble = price is num ? price.toDouble() : 0.0;
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            testName,
+                            style: const TextStyle(color: AppTheme.textDark),
+                          ),
+                        ),
+                        Text(
+                          'ILS ${priceDouble.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.textDark,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+                const Divider(),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Total Amount:',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textDark,
+                      ),
+                    ),
+                    Text(
+                      'ILS ${totalAmount.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.primaryBlue,
+                      ),
+                    ),
+                  ],
+                ),
+              ] else ...[
+                const Text('No test details available'),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Color _getTestStatusColor(String status) {
+    switch (status) {
+      case 'completed':
+        return AppTheme.successGreen;
+      case 'processing':
+        return AppTheme.warningYellow;
+      case 'pending':
+        return AppTheme.primaryBlue;
+      default:
+        return Colors.grey;
     }
   }
 
-  String _formatDate(String dateString) {
-    try {
-      final date = DateTime.parse(dateString);
-      final now = DateTime.now();
-      final difference = now.difference(date);
+  bool _isResultNormal(dynamic result, dynamic resultComponent) {
+    if (result == null || resultComponent == null) return false;
 
-      if (difference.inDays == 0) {
-        return 'Today ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
-      } else if (difference.inDays == 1) {
-        return 'Yesterday ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
-      } else if (difference.inDays < 7) {
-        return '${difference.inDays} days ago';
-      } else {
-        return '${date.day}/${date.month}/${date.year}';
+    final value = result['value'];
+    final minRange = resultComponent['normal_range_min'];
+    final maxRange = resultComponent['normal_range_max'];
+
+    if (value == null || minRange == null || maxRange == null) return false;
+
+    final numValue = num.tryParse(value.toString());
+    final numMin = num.tryParse(minRange.toString());
+    final numMax = num.tryParse(maxRange.toString());
+
+    if (numValue == null || numMin == null || numMax == null) return false;
+
+    return numValue >= numMin && numValue <= numMax;
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              label,
+              style: AppTheme.medicalTextStyle(
+                fontSize: 12,
+                color: AppTheme.textMedium,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              style: AppTheme.medicalTextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textDark,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getPatientFullName(user) {
+    if (user?.fullName != null) {
+      final first = user!.fullName!.first;
+      final middle = user.fullName!.middle;
+      final last = user.fullName!.last;
+
+      final nameParts = [first];
+      if (middle != null && middle.isNotEmpty) {
+        nameParts.add(middle);
       }
-    } catch (e) {
-      return dateString;
+      nameParts.add(last);
+
+      return nameParts.join(' ');
     }
+    return user?.email ?? 'N/A';
   }
 }

@@ -60,18 +60,20 @@ class StaffSidebar extends StatelessWidget {
                 children: [
                   _buildNavSection(context, 'WORKSTATION', [
                     _buildNavItem(context, 'Dashboard', Icons.dashboard, 0),
-                    _buildNavItem(context, 'My Tests', Icons.assignment, 1),
+                    _buildNavItem(context, 'New Order', Icons.add_box, 1),
+                    _buildNavItem(context, 'Orders', Icons.assignment, 2),
+                    _buildNavItem(context, 'Lab Tests', Icons.science, 3),
                     _buildNavItem(
                       context,
                       'Sample Collection',
                       Icons.science,
-                      2,
+                      4,
                     ),
                     _buildNavItem(
                       context,
                       'Result Upload',
                       Icons.upload_file,
-                      3,
+                      5,
                     ),
                   ]),
                   _buildNavSection(context, 'OPERATIONS', [
@@ -81,15 +83,16 @@ class StaffSidebar extends StatelessWidget {
                     //   Icons.qr_code,
                     //   4,
                     // ),
-                    _buildNavItem(context, 'Inventory', Icons.inventory, 5),
+                    _buildNavItem(context, 'Inventory', Icons.inventory, 6),
                     _buildNavItem(
                       context,
                       'Notifications',
                       Icons.notifications,
-                      6,
+                      7,
                     ),
                   ]),
                   _buildNavSection(context, 'ACCOUNT', [
+                    _buildNavItem(context, 'My Profile', Icons.person, 8),
                     _buildNavItem(
                       context,
                       'Logout',

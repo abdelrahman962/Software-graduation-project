@@ -8,6 +8,8 @@ import '../../config/theme.dart';
 import '../../config/api_config.dart';
 import '../../widgets/animations.dart';
 import '../../widgets/system_feedback_form.dart';
+import '../../utils/responsive_utils.dart' as app_responsive;
+import 'doctor_profile_screen.dart';
 
 class DoctorDashboardScreen extends StatefulWidget {
   const DoctorDashboardScreen({super.key});
@@ -102,7 +104,7 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
 
     if (!authProvider.isAuthenticated) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        context.go('/doctor/login');
+        context.go('/login');
       });
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
@@ -113,8 +115,13 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Patient Reports'),
-              Text(
+              app_responsive.ResponsiveText(
+                'Patient Reports',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              app_responsive.ResponsiveText(
                 'Welcome back, ${authProvider.user?.fullName?.first ?? authProvider.user?.email ?? 'Doctor'}',
                 style: TextStyle(
                   fontSize: 12,
@@ -131,6 +138,17 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
               icon: const Icon(Icons.notifications),
               onPressed: _showNotificationsDialog,
             ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.person),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const DoctorProfileScreen(),
+                ),
+              );
+            },
           ),
           IconButton(
             icon: const Icon(Icons.logout),
@@ -198,10 +216,20 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
   Widget _buildPatientsList() {
     return AppAnimations.pageDepthTransition(
       AnimatedListView(
-        padding: const EdgeInsets.all(16),
+        padding: app_responsive.ResponsiveUtils.getResponsivePadding(
+          context,
+          horizontal: 16,
+          vertical: 16,
+        ),
         children: [
           if (_showFeedbackReminder) _buildFeedbackReminderBanner(),
-          if (_showFeedbackReminder) const SizedBox(height: 16),
+          if (_showFeedbackReminder)
+            SizedBox(
+              height: app_responsive.ResponsiveUtils.getResponsiveSpacing(
+                context,
+                16,
+              ),
+            ),
 
           // Search Bar
           Row(
@@ -232,8 +260,13 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
               ),
               if (_searchController.text.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(left: 12),
-                  child: Text(
+                  padding: EdgeInsets.only(
+                    left: app_responsive.ResponsiveUtils.getResponsiveSpacing(
+                      context,
+                      12,
+                    ),
+                  ),
+                  child: app_responsive.ResponsiveText(
                     'Found: ${_filteredOrders.length}',
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.primary,
@@ -243,17 +276,39 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
                 ),
             ],
           ),
-          const SizedBox(height: 16),
+          SizedBox(
+            height: app_responsive.ResponsiveUtils.getResponsiveSpacing(
+              context,
+              16,
+            ),
+          ),
 
           // Order Cards
           if (_filteredOrders.isEmpty && !_isLoading)
             Center(
               child: Column(
                 children: [
-                  const SizedBox(height: 40),
-                  Icon(Icons.inbox_outlined, size: 64, color: Colors.grey[400]),
-                  const SizedBox(height: 16),
-                  Text(
+                  SizedBox(
+                    height: app_responsive.ResponsiveUtils.getResponsiveSpacing(
+                      context,
+                      40,
+                    ),
+                  ),
+                  Icon(
+                    Icons.inbox_outlined,
+                    size: app_responsive.ResponsiveUtils.getResponsiveIconSize(
+                      context,
+                      64,
+                    ),
+                    color: Colors.grey[400],
+                  ),
+                  SizedBox(
+                    height: app_responsive.ResponsiveUtils.getResponsiveSpacing(
+                      context,
+                      16,
+                    ),
+                  ),
+                  app_responsive.ResponsiveText(
                     _searchController.text.isNotEmpty
                         ? 'No reports found'
                         : 'No patient reports yet',

@@ -659,7 +659,7 @@ class _PublicRegistrationScreenState extends State<PublicRegistrationScreen> {
             Expanded(
               child: AppAnimations.slideInFromRight(
                 DropdownButtonFormField<String>(
-                  value: _selectedGender,
+                  initialValue: _selectedGender,
                   decoration: const InputDecoration(
                     labelText: 'Gender *',
                     prefixIcon: Icon(Icons.people),
@@ -759,7 +759,7 @@ class _PublicRegistrationScreenState extends State<PublicRegistrationScreen> {
         // Optional fields
         AppAnimations.slideInFromRight(
           DropdownButtonFormField<String>(
-            value: _socialStatusController.text.isNotEmpty
+            initialValue: _socialStatusController.text.isNotEmpty
                 ? _socialStatusController.text
                 : null,
             decoration: const InputDecoration(

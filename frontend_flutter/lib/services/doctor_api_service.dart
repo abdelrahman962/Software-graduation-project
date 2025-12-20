@@ -18,6 +18,27 @@ class DoctorApiService {
     return await ApiService.get('/doctor/dashboard');
   }
 
+  // Profile
+  static Future<Map<String, dynamic>> getProfile() async {
+    return await ApiService.get('/doctor/profile');
+  }
+
+  static Future<Map<String, dynamic>> updateProfile(
+    Map<String, dynamic> profileData,
+  ) async {
+    return await ApiService.put('/doctor/profile', profileData);
+  }
+
+  static Future<Map<String, dynamic>> changePassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
+    return await ApiService.put('/doctor/change-password', {
+      'current_password': currentPassword,
+      'new_password': newPassword,
+    });
+  }
+
   // Patients
   static Future<Map<String, dynamic>> getMyPatients() async {
     return await ApiService.get('/doctor/patients');

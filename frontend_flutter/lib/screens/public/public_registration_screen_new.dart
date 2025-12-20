@@ -437,7 +437,7 @@ class _PublicRegistrationScreenState extends State<PublicRegistrationScreen> {
         else
           AppAnimations.slideInFromLeft(
             DropdownButtonFormField<String>(
-              value: _selectedLabId,
+              initialValue: _selectedLabId,
               decoration: const InputDecoration(
                 labelText: 'Choose Lab *',
                 prefixIcon: Icon(Icons.business),

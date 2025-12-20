@@ -11,7 +11,22 @@ router.get('/contact-info', adminController.getContactInfo);
 // ✅ Protect routes: only Admins
 router.use(authMiddleware, roleMiddleware(['admin']));
 
-// 🟡 Lab Owner management routes
+// � Profile Management
+/**
+ * @route   GET /api/admin/profile
+ * @desc    Get admin profile
+ * @access  Private (Admin)
+ */
+router.get('/profile', adminController.getProfile);
+
+/**
+ * @route   PUT /api/admin/profile
+ * @desc    Update admin profile
+ * @access  Private (Admin)
+ */
+router.put('/profile', adminController.updateProfile);
+
+// �🟡 Lab Owner management routes
 router.get('/labowners', adminController.getAllLabOwners);
 router.get('/labowners/pending', adminController.getPendingLabOwners);
 router.get('/labowners/:ownerId', adminController.getLabOwnerById);
@@ -25,6 +40,7 @@ router.put('/labowners/:ownerId/reactivate', adminController.reactivateLabOwner)
 router.post('/notifications/send', adminController.sendGlobalNotification);
 router.get('/notifications', adminController.getAllNotifications);
 router.put('/notifications/:notificationId/read', adminController.markNotificationAsRead);
+router.post('/notifications/:notificationId/reply', adminController.replyToOwnerNotification);
 
 // 📝 Feedback routes
 router.get('/feedback', adminController.getAllFeedback);

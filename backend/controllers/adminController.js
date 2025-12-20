@@ -1,6 +1,61 @@
 const LabOwner = require('../models/Owner');
 const Notification = require('../models/Notification');
 const Admin = require('../models/Admin');
+
+// ==================== PROFILE MANAGEMENT ====================
+
+/**
+ * @desc    Get Admin Profile
+ * @route   GET /api/admin/profile
+ * @access  Private (Admin)
+ */
+exports.getProfile = async (req, res, next) => {
+  try {
+    const admin = await Admin.findById(req.user._id).select('-password');
+    
+    if (!admin) {
+      return res.status(404).json({ message: '❌ Admin not found' });
+    }
+
+    res.json(admin);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Update Admin Profile
+ * @route   PUT /api/admin/profile
+ * @access  Private (Admin)
+ */
+exports.updateProfile = async (req, res, next) => {
+  try {
+    const {
+      name,
+      email,
+      phone_number
+    } = req.body;
+
+    const admin = await Admin.findById(req.user._id);
+    if (!admin) {
+      return res.status(404).json({ message: '❌ Admin not found' });
+    }
+
+    // Update allowed fields
+    if (name) admin.name = name;
+    if (email) admin.email = email;
+    if (phone_number) admin.phone_number = phone_number;
+
+    await admin.save();
+
+    res.json({ 
+      message: '✅ Profile updated successfully', 
+      admin: await Admin.findById(admin._id).select('-password')
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 const AuditLog = require('../models/AuditLog');
 const Order = require('../models/Order');
 const jwt = require('jsonwebtoken');
@@ -57,7 +112,15 @@ exports.login = async (req, res, next) => {
 
 exports.getAllLabOwners = async (req, res, next) => {
   try {
-    const owners = await LabOwner.find();
+    // Get approved lab owners with active subscriptions
+    const owners = await LabOwner.find({
+      status: 'approved',
+      is_active: true,
+      $or: [
+        { subscription_end: null }, // No expiration date
+        { subscription_end: { $gt: new Date() } } // Not expired
+      ]
+    });
     res.json(owners);
   } catch (err) {
     next(err);
@@ -77,17 +140,75 @@ exports.approveLabOwner = async (req, res, next) => {
   try {
     const { ownerId } = req.params;
     const adminId = req.user._id; // ✅ Authenticated admin ID from token
-    const { subscription_end, subscriptionFee } = req.body;
+    let { subscription_end, subscriptionFee } = req.body;
 
     const request = await LabOwner.findById(ownerId);
     if (!request) return res.status(404).json({ message: "❌ Lab Owner request not found" });
     if (request.status !== 'pending') return res.status(400).json({ message: "⚠️ Request is not pending" });
-    if (!subscription_end) return res.status(400).json({ message: "⚠️ Subscription end date required" });
 
-    const endDate = new Date(subscription_end);
-    if (endDate <= new Date()) return res.status(400).json({ message: "⚠️ Subscription end date must be in the future" });
+    // If subscription_end not provided, calculate from owner's chosen period
+    let endDate;
+    if (subscription_end) {
+      endDate = new Date(subscription_end);
+      if (endDate <= new Date()) return res.status(400).json({ message: "⚠️ Subscription end date must be in the future" });
+    } else {
+      // Use owner's chosen subscription period (default 1 month)
+      const months = request.subscription_period_months || 1;
+      endDate = new Date();
+      endDate.setMonth(endDate.getMonth() + months);
+    }
 
-    // ✅ Update lab owner status, admin who approved, and fee
+    // Generate new credentials after approval
+    const generateUsername = () => {
+      const first = request.name.first.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const last = request.name.last.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return `${first}${last}`;
+    };
+
+    const generatePassword = () => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+      let password = '';
+      for (let i = 0; i < 10; i++) {
+        password += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return password;
+    };
+
+    let newUsername = generateUsername();
+    let newPassword = generatePassword();
+
+    // Check username uniqueness across all user types
+    const existingUsers = await Promise.all([
+      require('../models/Patient').findOne({ username: newUsername }),
+      require('../models/Doctor').findOne({ username: newUsername }),
+      require('../models/Staff').findOne({ username: newUsername }),
+      require('../models/Admin').findOne({ username: newUsername }),
+      LabOwner.findOne({ username: newUsername, _id: { $ne: request._id } })
+    ]);
+
+    // If username exists, append a number
+    let counter = 1;
+    while (existingUsers.some(user => user !== null)) {
+      newUsername = `${generateUsername()}${counter}`;
+      const checkAgain = await Promise.all([
+        require('../models/Patient').findOne({ username: newUsername }),
+        require('../models/Doctor').findOne({ username: newUsername }),
+        require('../models/Staff').findOne({ username: newUsername }),
+        require('../models/Admin').findOne({ username: newUsername }),
+        LabOwner.findOne({ username: newUsername, _id: { $ne: request._id } })
+      ]);
+      if (checkAgain.every(user => user === null)) break;
+      counter++;
+    }
+
+    // Hash the new password
+    const bcrypt = require('bcryptjs');
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // ✅ Update lab owner with new credentials, status, admin who approved, and fee
+    request.username = newUsername;
+    request.password = hashedPassword;
     request.status = 'approved';
     request.is_active = true;
     request.date_subscription = new Date();
@@ -109,6 +230,41 @@ exports.approveLabOwner = async (req, res, next) => {
       message: `Congratulations! Your lab owner request has been approved. Subscription valid until ${endDate.toDateString()}.`
     });
 
+    // Send approval email
+    const sendEmail = require('../utils/sendEmail');
+    const approvalSubject = '🎉 Your MedLab Account Has Been Approved!';
+    const approvalBody = `
+      <h2>Congratulations!</h2>
+      <p>Dear ${request.name.first} ${request.name.last},</p>
+      <p>Great news! Your laboratory registration for <strong>${request.lab_name}</strong> has been approved by our admin team.</p>
+      
+      <h3>Your Account Credentials:</h3>
+      <p><strong>Username:</strong> ${newUsername}</p>
+      <p><strong>Password:</strong> ${newPassword}</p>
+      <p><strong>Lab Name:</strong> ${request.lab_name}</p>
+      
+      <h3>Subscription Information:</h3>
+      <p><strong>Monthly Fee:</strong> $${request.subscriptionFee}</p>
+      <p><strong>Subscription Valid Until:</strong> ${endDate.toDateString()}</p>
+      
+      <h3>Next Steps:</h3>
+      <p>You can now log in to your account at <a href="${process.env.FRONTEND_URL || 'http://localhost:8080'}/login">MedLab System</a> using the credentials above.</p>
+      <p><strong>Important:</strong> For security purposes, we strongly recommend changing your password after your first login. You can also update your username if needed in your profile settings.</p>
+      
+      <p>If you have any questions or need assistance getting started, please don't hesitate to contact our support team.</p>
+      
+      <br>
+      <p>Welcome to MedLab System!<br>The MedLab Team</p>
+    `;
+
+    // TESTING: Email sending disabled
+    try {
+      await sendEmail(request.email, approvalSubject, approvalBody);
+    } catch (emailError) {
+      console.error('Failed to send approval email:', emailError);
+    }
+    console.log('📧 [TESTING] Approval email would be sent to:', request.email);
+
     res.json({ message: "✅ Lab Owner approved and account activated", labOwner: request });
   } catch (err) {
     next(err);
@@ -120,6 +276,7 @@ exports.rejectLabOwner = async (req, res, next) => {
   try {
     const { ownerId } = req.params;
     const adminId = req.user._id;
+    const { rejection_reason } = req.body;
 
     const request = await LabOwner.findById(ownerId);
     if (!request) return res.status(404).json({ message: "❌ Lab Owner request not found" });
@@ -127,6 +284,7 @@ exports.rejectLabOwner = async (req, res, next) => {
 
     request.status = 'rejected';
     request.is_active = false;
+    request.rejection_reason = rejection_reason || 'No reason provided';
 
     await request.save();
 
@@ -134,11 +292,37 @@ exports.rejectLabOwner = async (req, res, next) => {
       sender_id: adminId,
       sender_model: 'Admin',
       receiver_id: request._id,
-      receiver_model: 'LabOwner',
+      receiver_model: 'Owner',
       type: 'request',
       title: 'Lab Owner Request Rejected',
       message: `Your lab owner request was rejected. Reason: ${request.rejection_reason}`
     });
+
+    // Send rejection email
+    const sendEmail = require('../utils/sendEmail');
+    const rejectionSubject = 'MedLab Registration Update';
+    const rejectionBody = `
+      <h2>Registration Status Update</h2>
+      <p>Dear ${request.name.first} ${request.name.last},</p>
+      <p>Thank you for your interest in MedLab System for <strong>${request.lab_name}</strong>.</p>
+      <p>After careful review, we are unable to approve your registration at this time.</p>
+      
+      <h3>Reason:</h3>
+      <p>${request.rejection_reason}</p>
+      
+      <p>If you believe this decision was made in error or would like to discuss this further, please contact our support team at <a href="mailto:${process.env.ADMIN_EMAIL || 'support@medlabsystem.com'}">${process.env.ADMIN_EMAIL || 'support@medlabsystem.com'}</a>.</p>
+      
+      <br>
+      <p>Best regards,<br>The MedLab Team</p>
+    `;
+
+    // TESTING: Email sending disabled
+    try {
+      await sendEmail(request.email, rejectionSubject, rejectionBody);
+    } catch (emailError) {
+      console.error('Failed to send rejection email:', emailError);
+    }
+    console.log('📧 [TESTING] Rejection email would be sent to:', request.email);
 
     res.json({ message: "❌ Lab Owner request rejected", labOwner: request });
   } catch (err) {
@@ -604,7 +788,6 @@ exports.getAllFeedback = async (req, res, next) => {
     // Fetch feedback with user information
     const feedback = await Feedback.find()
       .populate('user_id', 'full_name email phone_number')
-      .populate('target_id')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -617,12 +800,10 @@ exports.getAllFeedback = async (req, res, next) => {
     }));
 
     const total = await Feedback.countDocuments();
-    const pendingCount = await Feedback.countDocuments({ status: 'pending' });
 
     res.json({
       feedback: enrichedFeedback,
       total,
-      pendingCount,
       page,
       totalPages: Math.ceil(total / limit)
     });
@@ -1012,8 +1193,8 @@ exports.getDashboard = async (req, res, next) => {
     const adminId = req.user._id;
 
     const [totalLabs, pendingRequests, unreadNotifications, expiringLabs] = await Promise.all([
-      LabOwner.countDocuments(),
-      LabOwner.countDocuments({ status: 'pending' }),
+      LabOwner.countDocuments({ status: 'approved' }), // Only count approved labs
+      LabOwner.countDocuments({ status: 'pending' }), // Count all pending requests (admins can see all)
       Notification.countDocuments({
         receiver_id: adminId,
         receiver_model: 'Admin',
@@ -1126,6 +1307,91 @@ exports.getStats = async (req, res, next) => {
       }
     });
   } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Reply to Owner Notification (with WhatsApp)
+ * @route   POST /api/admin/notifications/:notificationId/reply
+ * @access  Private (Admin)
+ */
+exports.replyToOwnerNotification = async (req, res, next) => {
+  try {
+    const { notificationId } = req.params;
+    const { message } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ message: '⚠️ Reply message is required' });
+    }
+
+    // Get the original notification
+    const originalNotification = await Notification.findOne({
+      _id: notificationId,
+      receiver_id: req.user._id,
+      receiver_model: 'Admin'
+    });
+
+    if (!originalNotification) {
+      return res.status(404).json({ message: '❌ Notification not found' });
+    }
+
+    // Get the owner who sent the original message
+    const owner = await LabOwner.findById(originalNotification.sender_id);
+    if (!owner) {
+      return res.status(404).json({ message: '❌ Owner not found' });
+    }
+
+    // Send WhatsApp reply to owner
+    const whatsappMessage = `📬 Reply from Admin\n\n💬 ${message}\n\n---\nRegards,\nMedical Lab System Admin`;
+
+    const { sendWhatsAppMessage } = require('../utils/sendWhatsApp');
+    const whatsappSuccess = await sendWhatsAppMessage(
+      owner.phone_number,
+      whatsappMessage,
+      [],
+      false, // Don't fallback to email
+      '',
+      ''
+    );
+
+    // Determine conversation_id
+    const conversationId = originalNotification.conversation_id || originalNotification._id;
+
+    // Create reply notification in database
+    const replyNotification = await Notification.create({
+      sender_id: req.user._id,
+      sender_model: 'Admin',
+      receiver_id: owner._id,
+      receiver_model: 'Owner',
+      type: 'message',
+      title: `Re: ${originalNotification.title}`,
+      message,
+      parent_id: notificationId,
+      conversation_id: conversationId,
+      is_reply: true
+    });
+
+    // Update original notification's conversation_id if it doesn't have one
+    if (!originalNotification.conversation_id) {
+      originalNotification.conversation_id = originalNotification._id;
+      await originalNotification.save();
+    }
+
+    // Mark original notification as read
+    originalNotification.is_read = true;
+    await originalNotification.save();
+
+    res.status(201).json({
+      message: whatsappSuccess
+        ? '✅ Reply sent successfully via WhatsApp and notification'
+        : '✅ Reply notification created (WhatsApp failed)',
+      notification: replyNotification,
+      whatsappSent: whatsappSuccess
+    });
+
+  } catch (err) {
+    console.error('Reply error:', err);
     next(err);
   }
 };

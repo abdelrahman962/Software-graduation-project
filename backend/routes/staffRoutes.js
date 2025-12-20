@@ -19,6 +19,30 @@ const { validateRequest } = require('../middleware/validationMiddleware');
 router.post("/login", loginLimiter, ...staffValidator.validateLogin, validateRequest, staffController.loginStaff);
 
 // ===============================
+// 👤 Profile Management
+// ===============================
+/**
+ * @route   GET /api/staff/profile
+ * @desc    Get staff profile
+ * @access  Private (Staff)
+ */
+router.get("/profile", authMiddleware, roleMiddleware(['Staff']), staffController.getProfile);
+
+/**
+ * @route   PUT /api/staff/profile
+ * @desc    Update staff profile
+ * @access  Private (Staff)
+ */
+router.put("/profile", authMiddleware, roleMiddleware(['Staff']), staffController.updateProfile);
+
+/**
+ * @route   PUT /api/staff/change-password
+ * @desc    Change staff password
+ * @access  Private (Staff)
+ */
+router.put("/change-password", authMiddleware, roleMiddleware(['Staff']), staffController.changePassword);
+
+// ===============================
 // 🧪 Tests & Results
 // ===============================
 router.post("/collect-sample", 
@@ -45,10 +69,52 @@ router.post("/upload-result",
   staffController.uploadResult
 );
 
+router.get("/tests/:testId/components",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  staffController.getTestComponentsForStaff
+);
+
 router.get("/assigned-tests/:staff_id", 
   authMiddleware, 
   roleMiddleware(['Staff']), 
   staffController.getAssignedTests
+);
+
+/**
+ * @route   POST /api/staff/assign-test-to-me
+ * @desc    Allow staff to assign themselves to an unassigned test
+ * @access  Private (Staff)
+ */
+router.post("/assign-test-to-me", 
+  authMiddleware, 
+  roleMiddleware(['Staff']), 
+  ...staffValidator.validateAssignTestToMe,
+  validateRequest,
+  staffController.assignTestToMe
+);
+
+/**
+ * @route   GET /api/staff/orders
+ * @desc    Get all orders for the staff's lab
+ * @access  Private (Staff)
+ */
+router.get("/orders", 
+  authMiddleware, 
+  roleMiddleware(['Staff']), 
+  staffController.getAllLabOrders
+);
+
+/**
+ * @route   GET /api/staff/lab-tests
+ * @desc    Get all tests available in the staff's lab
+ * @access  Private (Staff)
+ */
+router.get(
+  "/lab-tests",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  staffController.getLabTests
 );
 
 // ===============================
@@ -133,6 +199,18 @@ router.get(
 // ===============================
 
 /**
+ * @route   POST /api/staff/create-walk-in-order
+ * @desc    Create order for walk-in patient
+ * @access  Private (Staff)
+ */
+router.post(
+  "/create-walk-in-order",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  staffController.createWalkInOrder
+);
+
+/**
  * @route   GET /api/staff/orders
  * @desc    Get all orders for the lab (all statuses)
  * @access  Private (Staff)
@@ -169,12 +247,12 @@ router.post(
 );
 
 /**
- * @route   GET /api/staff/order-details/:order_id
+ * @route   GET /api/staff/order-details/:orderId
  * @desc    Get all test items (OrderDetails) for a specific order
  * @access  Private (Staff)
  */
 router.get(
-  "/order-details/:order_id",
+  "/order-details/:orderId",
   authMiddleware,
   roleMiddleware(['Staff']),
   staffController.getOrderDetails
@@ -253,12 +331,12 @@ router.post(
 );
 
 /**
- * @route   POST /api/staff/generate-barcode/:order_id
+ * @route   POST /api/staff/generate-barcode/:orderId
  * @desc    Generate barcode for an order (can be called before sample collection)
  * @access  Private (Staff)
  */
 router.post(
-  "/generate-barcode/:order_id",
+  "/generate-barcode/:orderId",
   authMiddleware,
   roleMiddleware(['Staff']),
   staffController.generateBarcode
@@ -291,6 +369,24 @@ router.get(
   roleMiddleware(['Staff']),
   staffController.getMyFeedback
 );
+
+// ===============================
+// 📊 Results & Invoices
+// ===============================
+
+/**
+ * @route   GET /api/staff/results
+ * @desc    Get all results for staff's lab
+ * @access  Private (Staff)
+ */
+router.get('/results', authMiddleware, roleMiddleware(['Staff']), staffController.getAllResults);
+
+/**
+ * @route   GET /api/staff/invoices
+ * @desc    Get all invoices for staff's lab
+ * @access  Private (Staff)
+ */
+router.get('/invoices', authMiddleware, roleMiddleware(['Staff']), staffController.getAllInvoices);
 
 // ===============================
 // ✅ Export Router

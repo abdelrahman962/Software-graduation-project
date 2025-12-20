@@ -18,6 +18,28 @@ router.post("/login", ...doctorValidator.validateLogin, validateRequest, doctorC
 router.use(authMiddleware);
 router.use(roleMiddleware(["Doctor"]));
 
+// ==================== PROFILE ====================
+/**
+ * @route   GET /api/doctor/profile
+ * @desc    Get doctor profile
+ * @access  Private (Doctor)
+ */
+router.get("/profile", doctorController.getProfile);
+
+/**
+ * @route   PUT /api/doctor/profile
+ * @desc    Update doctor profile
+ * @access  Private (Doctor)
+ */
+router.put("/profile", doctorController.updateProfile);
+
+/**
+ * @route   PUT /api/doctor/change-password
+ * @desc    Change doctor password
+ * @access  Private (Doctor)
+ */
+router.put("/change-password", authMiddleware, roleMiddleware(['Doctor']), doctorController.changePassword);
+
 // ==================== DASHBOARD ====================
 /**
  * @route   GET /api/doctor/dashboard
@@ -94,11 +116,11 @@ router.get("/patient/:patient_id/history", doctorController.getPatientTestHistor
 router.get("/patient-orders", doctorController.getPatientOrdersWithResults);
 
 /**
- * @route   GET /api/doctor/order/:order_id/results
+ * @route   GET /api/doctor/order/:orderId/results
  * @desc    Get detailed results for a specific order
  * @access  Private (Doctor)
  */
-router.get("/order/:order_id/results", doctorController.getOrderResults);
+router.get("/order/:orderId/results", doctorController.getOrderResults);
 
 // ==================== TEST ORDERING ====================
 /**
@@ -109,11 +131,11 @@ router.get("/order/:order_id/results", doctorController.getOrderResults);
 router.post("/request-test", ...doctorValidator.validateRequestTest, validateRequest, doctorController.requestTestForPatient);
 
 /**
- * @route   POST /api/doctor/order/:order_id/urgent
+ * @route   POST /api/doctor/order/:orderId/urgent
  * @desc    Mark existing order as urgent
  * @access  Private (Doctor)
  */
-router.post("/order/:order_id/urgent", ...doctorValidator.validateMarkUrgent, validateRequest, doctorController.markTestUrgent);
+router.post("/order/:orderId/urgent", ...doctorValidator.validateMarkUrgent, validateRequest, doctorController.markTestUrgent);
 
 // ==================== FEEDBACK ====================
 /**

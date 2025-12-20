@@ -4,12 +4,14 @@ import 'package:go_router/go_router.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
+import '../../services/admin_service.dart';
 import '../../config/api_config.dart';
 import '../../widgets/animations.dart';
 import '../../config/theme.dart';
 import '../../widgets/admin_sidebar.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'dart:async';
+import 'admin_profile_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -26,6 +28,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _isSidebarOpen = true;
   String _labOwnersSearchQuery = '';
   Timer? _searchDebounceTimer;
+  int _refreshKey = 0; // Force FutureBuilder refresh
 
   @override
   void initState() {
@@ -61,6 +64,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       setState(() {
         _dashboardData = result is Map<String, dynamic> ? result : {};
         _isLoading = false;
+        _refreshKey++; // Force refresh
       });
     } catch (e) {
       setState(() => _isLoading = false);
@@ -94,10 +98,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       case 5: // Feedback - show in main content
         // Content shown when _selectedIndex == 5
         break;
-      case 6: // System Reports - show in main content
-        // Content shown when _selectedIndex == 6
-        break;
-      case 7: // Settings
+      case 6: // Settings
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Settings panel coming soon!')),
         );
@@ -125,7 +126,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
     if (!authProvider.isAuthenticated) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        context.go('/admin/login');
+        context.go('/login');
       });
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
@@ -152,6 +153,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   context,
                 ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _loadDashboardData,
+                  tooltip: 'Refresh dashboard',
+                ),
+              ],
             )
           : AppBar(
               backgroundColor: Theme.of(context).colorScheme.surface,
@@ -202,6 +210,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       ),
                     ],
                   ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _loadDashboardData,
+                  tooltip: 'Refresh dashboard',
                 ),
                 const SizedBox(width: 16),
               ],
@@ -296,6 +309,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         AppAnimations.fadeIn(
                           _buildFeedbackSection(context, isMobile, isVerySmall),
                         ),
+                      // Profile Section
+                      if (_selectedIndex == 6)
+                        AppAnimations.fadeIn(const AdminProfileScreen()),
                     ],
                   ),
                 ),
@@ -910,7 +926,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     bool isVerySmall,
   ) {
     return FutureBuilder(
-      future: ApiService.get(ApiConfig.adminLabOwners),
+      key: ObjectKey(_refreshKey),
+      future: ApiService.get(ApiConfig.adminPendingLabOwners),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -938,11 +955,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         }
 
         final response = snapshot.data;
-        final allLabs = response is List ? response : [];
-        // Filter only pending requests
-        final pendingRequests = allLabs
-            .where((owner) => owner['status'] == 'pending')
-            .toList();
+        final pendingRequests = response is List ? response : [];
 
         return Container(
           width: double.infinity,
@@ -1108,8 +1121,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                       requestDate,
                                     ),
                                     const SizedBox(height: 16),
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
+                                    Wrap(
+                                      alignment: WrapAlignment.end,
+                                      spacing: 12,
+                                      runSpacing: 8,
                                       children: [
                                         ElevatedButton.icon(
                                           onPressed: () async {
@@ -1126,7 +1141,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                             foregroundColor: Colors.white,
                                           ),
                                         ),
-                                        const SizedBox(width: 12),
                                         OutlinedButton.icon(
                                           onPressed: () async {
                                             await _rejectLabOwner(
@@ -1531,6 +1545,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     bool isVerySmall,
   ) {
     return FutureBuilder(
+      key: ObjectKey(_refreshKey),
       future: ApiService.get(ApiConfig.adminLabOwners),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -1842,7 +1857,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
 
     try {
-      final response = await ApiService.get(ApiConfig.adminLabOwners);
+      final response = await ApiService.get(ApiConfig.adminPendingLabOwners);
 
       if (!mounted) return;
 
@@ -1850,11 +1865,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
       if (!mounted) return;
 
-      // Filter only pending requests
-      final allLabs = response is List ? response : [];
-      final pendingRequests = allLabs
-          .where((owner) => owner['status'] == 'pending')
-          .toList();
+      // API already returns only pending requests
+      final pendingRequests = response is List ? response : [];
 
       showDialog(
         context: context,
@@ -3140,23 +3152,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               }
 
               try {
-                // Send notification reply to the lab owner
-                await ApiService.sendNotificationToOwner(
-                  ownerId:
-                      notificationId, // This should be the owner ID from the notification
-                  title: 'Admin Reply',
-                  message: replyController.text.trim(),
-                  type: 'message',
+                // Send notification reply to the lab owner (with WhatsApp)
+                final result = await AdminService.replyToOwnerNotification(
+                  notificationId,
+                  replyController.text.trim(),
                 );
 
-                Navigator.pop(dialogContext);
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('✅ Reply sent to $toName'),
-                      backgroundColor: AppTheme.successGreen,
-                    ),
-                  );
+                if (result['success']) {
+                  Navigator.pop(dialogContext);
+                  if (context.mounted) {
+                    final whatsappSent =
+                        result['data']['whatsappSent'] ?? false;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          whatsappSent
+                              ? '✅ Reply sent via WhatsApp and notification'
+                              : '✅ Reply notification sent (WhatsApp failed)',
+                        ),
+                        backgroundColor: AppTheme.successGreen,
+                      ),
+                    );
+                  }
+                } else {
+                  throw Exception(result['message']);
                 }
               } catch (e) {
                 if (context.mounted) {
@@ -3216,7 +3235,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
         );
         // Refresh the pending approvals section
-        setState(() {});
+        setState(() {
+          _refreshKey++;
+        });
       } else {
         throw Exception(result['message'] ?? 'Approval failed');
       }
@@ -3293,7 +3314,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ),
           );
           // Refresh the pending approvals section
-          setState(() {});
+          setState(() {
+            _refreshKey++;
+          });
         } else {
           throw Exception(apiResult['message'] ?? 'Rejection failed');
         }
@@ -3344,7 +3367,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         final response = snapshot.data as Map<String, dynamic>?;
         final feedbackList = response?['feedback'] as List? ?? [];
         final total = response?['total'] ?? 0;
-        final pendingCount = response?['pendingCount'] ?? 0;
 
         return Container(
           width: double.infinity,
@@ -3371,47 +3393,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              Row(
-                children: [
-                  Text(
-                    'Total Feedback: $total',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  if (pendingCount > 0) ...[
-                    const SizedBox(width: 16),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.accentOrange,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.pending,
-                            color: Colors.white,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '$pendingCount Pending',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
+              Text(
+                'Total Feedback: $total',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 24),
               if (feedbackList.isEmpty)
@@ -3457,8 +3443,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         final userEmail = userId?['email'] ?? 'N/A';
                         final rating = feedback['rating'] ?? 0;
                         final message = feedback['message'] ?? '';
-                        final targetType = feedback['target_type'] ?? 'system';
-                        final status = feedback['status'] ?? 'pending';
                         final createdAt = feedback['createdAt'];
                         final isAnonymous = feedback['is_anonymous'] ?? false;
 
@@ -3471,23 +3455,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             ? 'Anonymous User'
                             : '$userName ($displayRole)';
 
-                        Color statusColor;
-                        switch (status) {
-                          case 'reviewed':
-                            statusColor = AppTheme.primaryBlue;
-                            break;
-                          case 'responded':
-                            statusColor = AppTheme.successGreen;
-                            break;
-                          default:
-                            statusColor = AppTheme.accentOrange;
-                        }
-
                         return AnimatedCard(
                           margin: const EdgeInsets.only(bottom: 16),
                           child: ExpansionTile(
                             leading: CircleAvatar(
-                              backgroundColor: statusColor,
+                              backgroundColor: Theme.of(context).primaryColor,
                               child: Text(
                                 isAnonymous
                                     ? '?'
@@ -3525,24 +3497,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               ],
                             ),
                             subtitle: Text(
-                              '${targetType.toUpperCase()} • ${_formatNotificationDate(createdAt)}',
+                              _formatNotificationDate(createdAt),
                               style: TextStyle(
                                 color: Colors.grey[600],
                                 fontSize: 12,
-                              ),
-                            ),
-                            trailing: Chip(
-                              label: Text(
-                                status.toUpperCase(),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              backgroundColor: statusColor,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
                               ),
                             ),
                             children: [
@@ -3571,12 +3529,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                       ),
                                       const SizedBox(height: 8),
                                     ],
-                                    _buildDetailRow(
-                                      Icons.category,
-                                      'Target Type',
-                                      targetType,
-                                    ),
-                                    const SizedBox(height: 8),
                                     _buildDetailRow(
                                       Icons.calendar_today,
                                       'Submitted',

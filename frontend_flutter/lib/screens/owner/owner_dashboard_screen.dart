@@ -1,8 +1,13 @@
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:intl/intl.dart';
+import 'dart:math';
+import '../../utils/page_title_helper.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../providers/owner_auth_provider.dart';
 import '../../services/owner_api_service.dart';
@@ -14,7 +19,9 @@ import '../../services/api_service.dart';
 import '../../config/api_config.dart';
 import '../../widgets/confirmation_dialog.dart';
 import '../../widgets/system_feedback_form.dart';
+import '../../utils/responsive_utils.dart' as app_responsive;
 import 'owner_sidebar.dart';
+import 'owner_profile_screen.dart';
 
 class OwnerDashboardScreen extends StatefulWidget {
   final int? initialTab;
@@ -38,13 +45,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
   // Reports data
   Map<String, dynamic>? _reportsData;
   bool _isLoadingReports = false; // Financial reports loading state
-
-  // Loading states for each section
-  bool _isLoadingStaff = false;
-  bool _isLoadingDoctors = false;
-  bool _isLoadingTests = false;
-  bool _isLoadingDevices = false;
-  bool _isLoadingOrders = false;
 
   // Error states
   String? _ordersError;
@@ -98,6 +98,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    PageTitleHelper.updateTitle('Owner Dashboard - MedLab System');
     _selectedIndex = widget.initialTab ?? 0;
     _initializeAuthAndDashboard();
   }
@@ -232,21 +233,20 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     if (_staff.isNotEmpty || !mounted) {
       return; // Already loaded or widget disposed
     }
-    setState(() => _isLoadingStaff = true);
     try {
       await Future.delayed(
         const Duration(milliseconds: 1600),
       ); // Increased delay
       if (!mounted) return; // Check again after delay
       final response = await OwnerApiService.getStaff();
-      if (response['staff'] != null && mounted) {
+      if (mounted) {
         setState(() {
-          _staff = List<Map<String, dynamic>>.from(response['staff']);
-          _isLoadingStaff = false;
+          _staff = response['staff'] != null
+              ? List<Map<String, dynamic>>.from(response['staff'])
+              : [];
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoadingStaff = false);
       debugPrint('Background staff loading failed: $e');
     }
   }
@@ -255,21 +255,20 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     if (_doctors.isNotEmpty || !mounted) {
       return; // Already loaded or widget disposed
     }
-    setState(() => _isLoadingDoctors = true);
     try {
       await Future.delayed(
         const Duration(milliseconds: 2400),
       ); // Increased delay
       if (!mounted) return; // Check again after delay
       final response = await OwnerApiService.getDoctors();
-      if (response['doctors'] != null && mounted) {
+      if (mounted) {
         setState(() {
-          _doctors = List<Map<String, dynamic>>.from(response['doctors']);
-          _isLoadingDoctors = false;
+          _doctors = response['doctors'] != null
+              ? List<Map<String, dynamic>>.from(response['doctors'])
+              : [];
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoadingDoctors = false);
       debugPrint('Background doctors loading failed: $e');
     }
   }
@@ -278,21 +277,20 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     if (_tests.isNotEmpty || !mounted) {
       return; // Already loaded or widget disposed
     }
-    setState(() => _isLoadingTests = true);
     try {
       await Future.delayed(
         const Duration(milliseconds: 3200),
       ); // Increased delay
       if (!mounted) return; // Check again after delay
       final response = await OwnerApiService.getTests();
-      if (response['tests'] != null && mounted) {
+      if (mounted) {
         setState(() {
-          _tests = List<Map<String, dynamic>>.from(response['tests']);
-          _isLoadingTests = false;
+          _tests = response['tests'] != null
+              ? List<Map<String, dynamic>>.from(response['tests'])
+              : [];
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoadingTests = false);
       debugPrint('Background tests loading failed: $e');
     }
   }
@@ -301,7 +299,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     if (_devices.isNotEmpty || !mounted) {
       return; // Already loaded or widget disposed
     }
-    setState(() => _isLoadingDevices = true);
     try {
       await Future.delayed(
         const Duration(milliseconds: 4000),
@@ -311,11 +308,10 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
       if (response['devices'] != null && mounted) {
         setState(() {
           _devices = List<Map<String, dynamic>>.from(response['devices']);
-          _isLoadingDevices = false;
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoadingDevices = false);
+      debugPrint('Background devices loading failed: $e');
       debugPrint('Background devices loading failed: $e');
     }
   }
@@ -354,7 +350,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
 
     if (!authProvider.isAuthenticated) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        context.go('/owner/login');
+        context.go('/login');
       });
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
@@ -374,13 +370,13 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
               title: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  app_responsive.ResponsiveText(
                     'Lab Owner Dashboard',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  Text(
+                  app_responsive.ResponsiveText(
                     'Welcome back, ${authProvider.user?.fullName?.first ?? 'Owner'}',
                     style: TextStyle(
                       fontSize: 12,
@@ -407,13 +403,13 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
               title: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  app_responsive.ResponsiveText(
                     'Lab Owner Dashboard',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  Text(
+                  app_responsive.ResponsiveText(
                     'Welcome back, ${authProvider.user?.fullName?.first ?? 'Owner'}',
                     style: TextStyle(
                       fontSize: 12,
@@ -425,7 +421,8 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
               ),
               actions: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
+                  padding: app_responsive.ResponsiveUtils.getResponsivePadding(
+                    context,
                     horizontal: 16,
                     vertical: 8,
                   ),
@@ -438,10 +435,14 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                       Icon(
                         Icons.business,
                         color: AppTheme.primaryBlue,
-                        size: 20,
+                        size: app_responsive
+                            .ResponsiveUtils.getResponsiveIconSize(context, 20),
                       ),
-                      const SizedBox(width: 8),
-                      Text(
+                      SizedBox(
+                        width: app_responsive
+                            .ResponsiveUtils.getResponsiveSpacing(context, 8),
+                      ),
+                      app_responsive.ResponsiveText(
                         'Lab Owner',
                         style: TextStyle(
                           color: AppTheme.primaryBlue,
@@ -526,14 +527,23 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
           ),
           builder: (context) => Container(
-            padding: const EdgeInsets.all(20),
+            padding: app_responsive.ResponsiveUtils.getResponsivePadding(
+              context,
+              horizontal: 20,
+              vertical: 20,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
                   width: 40,
                   height: 4,
-                  margin: const EdgeInsets.only(bottom: 20),
+                  margin: EdgeInsets.only(
+                    bottom: app_responsive.ResponsiveUtils.getResponsiveSpacing(
+                      context,
+                      20,
+                    ),
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.grey[300],
                     borderRadius: BorderRadius.circular(2),
@@ -631,8 +641,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
               onPressed: isSubmitting
                   ? null
                   : () {
-                      titleController.dispose();
-                      messageController.dispose();
                       Navigator.pop(context);
                     },
               child: const Text('Cancel'),
@@ -689,8 +697,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                         }
                       } finally {
                         setState(() => isSubmitting = false);
-                        titleController.dispose();
-                        messageController.dispose();
                       }
                     },
               icon: isSubmitting
@@ -705,7 +711,11 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
           ],
         ),
       ),
-    );
+    ).then((_) {
+      // Dispose controllers when dialog is completely closed
+      titleController.dispose();
+      messageController.dispose();
+    });
   }
 
   void _showFeedbackDialog() {
@@ -794,41 +804,41 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Help us improve by sharing your feedback about the system',
+                    'Help us improve by sharing your feedback',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            Column(
-              children: [
-                ElevatedButton.icon(
-                  onPressed: () => _showFeedbackDialog(),
-                  icon: const Icon(Icons.rate_review, size: 18),
-                  label: const Text('Provide Feedback'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryBlue,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
+            Flexible(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () => _showFeedbackDialog(),
+                    icon: const Icon(Icons.rate_review, size: 18),
+                    label: const Text('Feedback'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryBlue,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: () {
-                    setState(() {
-                      _showFeedbackReminder = false;
-                    });
-                  },
-                  child: const Text(
-                    'Remind me later',
-                    style: TextStyle(fontSize: 12),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _showFeedbackReminder = false;
+                      });
+                    },
+                    child: const Text('Later', style: TextStyle(fontSize: 12)),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
@@ -925,40 +935,40 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
         return _buildDashboardView();
       case 1:
         // Load staff when navigating to staff tab
-        if (_staff.isEmpty && !_isLoadingStaff) {
+        if (_staff.isEmpty) {
           _loadStaffInBackground();
         }
         return _buildStaffView();
       case 2:
         // Load doctors when navigating to doctors tab
-        if (_doctors.isEmpty && !_isLoadingDoctors) {
+        if (_doctors.isEmpty) {
           _loadDoctorsInBackground();
         }
         return _buildDoctorsView();
       case 3:
         // Load orders when navigating to orders tab
-        if (_orders.isEmpty && !_isLoadingOrders) {
+        if (_orders.isEmpty) {
           _loadOrdersInBackground();
         }
         return _buildOrdersView();
       case 4:
         // Load tests when navigating to tests tab
-        if (_tests.isEmpty && !_isLoadingTests) {
+        if (_tests.isEmpty) {
           _loadTestsInBackground();
         }
         return _buildTestsView();
       case 5:
         // Load devices when navigating to devices tab
-        if (_devices.isEmpty && !_isLoadingDevices) {
+        if (_devices.isEmpty) {
           _loadDevicesInBackground();
         }
         return _buildDevicesView();
       case 6:
         return _buildInventoryView();
       case 7:
-        return _buildReportsView();
-      case 8:
         return _buildAuditLogsView();
+      case 8:
+        return const OwnerProfileScreen();
       default:
         return _buildDashboardView();
     }
@@ -978,7 +988,12 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
               children: [
                 if (_showFeedbackReminder)
                   Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding:
+                        app_responsive.ResponsiveUtils.getResponsivePadding(
+                          context,
+                          horizontal: 16,
+                          vertical: 16,
+                        ),
                     child: AppAnimations.elasticSlideIn(
                       _buildFeedbackReminderBanner(),
                       delay: 50.ms,
@@ -1377,7 +1392,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
 
         return RefreshIndicator(
           onRefresh: () async {
-            // Load orders data
             if (_orders.isEmpty) {
               await _loadOrdersInBackground();
             }
@@ -1398,113 +1412,8 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                 ),
                 SizedBox(height: isVerySmall ? 20 : 32),
 
-                // Search and Filters
-                AppAnimations.slideInFromLeft(
-                  Container(
-                    padding: EdgeInsets.all(isVerySmall ? 16 : 24),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.05),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _searchController,
-                                decoration: InputDecoration(
-                                  hintText:
-                                      'Search by patient name, order ID, or doctor...',
-                                  prefixIcon: const Icon(Icons.search),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.grey[50],
-                                ),
-                                onChanged: (value) => setState(() {}),
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            ElevatedButton.icon(
-                              icon: const Icon(Icons.refresh),
-                              label: Text(
-                                isMobile ? 'Refresh' : 'Refresh Orders',
-                              ),
-                              onPressed: _loadOrdersInBackground,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.primaryBlue,
-                                foregroundColor: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: DropdownButtonFormField<String>(
-                                initialValue: _selectedStatus,
-                                decoration: InputDecoration(
-                                  labelText: 'Status Filter',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.grey[50],
-                                ),
-                                items: [
-                                  const DropdownMenuItem(
-                                    value: '',
-                                    child: Text('All Statuses'),
-                                  ),
-                                  const DropdownMenuItem(
-                                    value: 'pending',
-                                    child: Text('Pending'),
-                                  ),
-                                  const DropdownMenuItem(
-                                    value: 'processing',
-                                    child: Text('Processing'),
-                                  ),
-                                  const DropdownMenuItem(
-                                    value: 'completed',
-                                    child: Text('Completed'),
-                                  ),
-                                  const DropdownMenuItem(
-                                    value: 'cancelled',
-                                    child: Text('Cancelled'),
-                                  ),
-                                ],
-                                onChanged: (value) =>
-                                    setState(() => _selectedStatus = value),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  delay: 200.ms,
-                ),
-
-                SizedBox(height: isVerySmall ? 20 : 32),
-
                 // Orders List
-                ...(_isLoadingOrders
-                    ? [
-                        AppAnimations.pulse(
-                          const Center(child: CircularProgressIndicator()),
-                        ),
-                      ]
-                    : _ordersError != null
+                ...(_ordersError != null
                     ? [
                         AppAnimations.fadeIn(
                           Center(
@@ -1580,502 +1489,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                           itemBuilder: (context, index) {
                             final order = _filteredOrders[index];
                             return AppAnimations.slideInFromRight(
-                              AnimatedCard(
-                                onTap: () => _showOrderDetails(context, order),
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: [
-                                        Colors.white,
-                                        _getStatusColor(
-                                          order['status'] ?? 'pending',
-                                        ).withValues(alpha: 0.02),
-                                      ],
-                                    ),
-                                    border: Border(
-                                      left: BorderSide(
-                                        color: _getStatusColor(
-                                          order['status'] ?? 'pending',
-                                        ),
-                                        width: 4,
-                                      ),
-                                    ),
-                                  ),
-                                  child: Padding(
-                                    padding: EdgeInsets.all(
-                                      isVerySmall ? 16 : 20,
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        // Header Row
-                                        Row(
-                                          children: [
-                                            Container(
-                                              padding: const EdgeInsets.all(12),
-                                              decoration: BoxDecoration(
-                                                gradient: LinearGradient(
-                                                  colors: [
-                                                    AppTheme.primaryBlue,
-                                                    AppTheme.primaryBlue
-                                                        .withValues(alpha: 0.7),
-                                                  ],
-                                                ),
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                                boxShadow: [
-                                                  BoxShadow(
-                                                    color: AppTheme.primaryBlue
-                                                        .withValues(alpha: 0.3),
-                                                    blurRadius: 8,
-                                                    offset: const Offset(0, 2),
-                                                  ),
-                                                ],
-                                              ),
-                                              child: Icon(
-                                                Icons.assignment_outlined,
-                                                color: Colors.white,
-                                                size: isVerySmall ? 22 : 26,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Row(
-                                                    children: [
-                                                      Text(
-                                                        'Order #${order['_id']?.toString().substring(0, 8) ?? 'N/A'}',
-                                                        style: Theme.of(context)
-                                                            .textTheme
-                                                            .titleMedium
-                                                            ?.copyWith(
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .bold,
-                                                              color: AppTheme
-                                                                  .textDark,
-                                                            ),
-                                                      ),
-                                                      const SizedBox(width: 8),
-                                                      if (order['barcode'] !=
-                                                          null)
-                                                        Container(
-                                                          padding:
-                                                              const EdgeInsets.symmetric(
-                                                                horizontal: 6,
-                                                                vertical: 2,
-                                                              ),
-                                                          decoration: BoxDecoration(
-                                                            color: Colors
-                                                                .grey[200],
-                                                            borderRadius:
-                                                                BorderRadius.circular(
-                                                                  4,
-                                                                ),
-                                                          ),
-                                                          child: Row(
-                                                            mainAxisSize:
-                                                                MainAxisSize
-                                                                    .min,
-                                                            children: [
-                                                              Icon(
-                                                                Icons.qr_code,
-                                                                size: 12,
-                                                                color: Colors
-                                                                    .grey[700],
-                                                              ),
-                                                              const SizedBox(
-                                                                width: 4,
-                                                              ),
-                                                              Text(
-                                                                order['barcode']
-                                                                    .toString()
-                                                                    .split('-')
-                                                                    .last,
-                                                                style: TextStyle(
-                                                                  fontSize: 10,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w600,
-                                                                  color: Colors
-                                                                      .grey[700],
-                                                                  fontFamily:
-                                                                      'monospace',
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(height: 4),
-                                                  Row(
-                                                    children: [
-                                                      Icon(
-                                                        Icons.calendar_today,
-                                                        size: 12,
-                                                        color: Colors.grey[600],
-                                                      ),
-                                                      const SizedBox(width: 4),
-                                                      Text(
-                                                        order['order_date'] !=
-                                                                null
-                                                            ? DateTime.parse(
-                                                                order['order_date'],
-                                                              ).toString().split(
-                                                                ' ',
-                                                              )[0]
-                                                            : 'N/A',
-                                                        style: Theme.of(context)
-                                                            .textTheme
-                                                            .bodySmall
-                                                            ?.copyWith(
-                                                              color: Colors
-                                                                  .grey[600],
-                                                            ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 12,
-                                                    vertical: 6,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: _getStatusColor(
-                                                  order['status'] ?? 'pending',
-                                                ),
-                                                borderRadius:
-                                                    BorderRadius.circular(20),
-                                                boxShadow: [
-                                                  BoxShadow(
-                                                    color: _getStatusColor(
-                                                      order['status'] ??
-                                                          'pending',
-                                                    ).withValues(alpha: 0.3),
-                                                    blurRadius: 4,
-                                                    offset: const Offset(0, 2),
-                                                  ),
-                                                ],
-                                              ),
-                                              child: Text(
-                                                _getStatusText(
-                                                  order['status'] ?? 'pending',
-                                                ),
-                                                style: const TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-
-                                        const SizedBox(height: 16),
-
-                                        // Patient & Doctor Info
-                                        Container(
-                                          padding: const EdgeInsets.all(12),
-                                          decoration: BoxDecoration(
-                                            color: Colors.grey[50],
-                                            borderRadius: BorderRadius.circular(
-                                              8,
-                                            ),
-                                            border: Border.all(
-                                              color: Colors.grey[200]!,
-                                            ),
-                                          ),
-                                          child: Column(
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  Container(
-                                                    padding:
-                                                        const EdgeInsets.all(6),
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.blue[50],
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            6,
-                                                          ),
-                                                    ),
-                                                    child: Icon(
-                                                      Icons.person,
-                                                      size: 16,
-                                                      color: Colors.blue[700],
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  Expanded(
-                                                    child: Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        Text(
-                                                          'Patient',
-                                                          style: TextStyle(
-                                                            fontSize: 10,
-                                                            color: Colors
-                                                                .grey[600],
-                                                            fontWeight:
-                                                                FontWeight.w500,
-                                                          ),
-                                                        ),
-                                                        Text(
-                                                          order['patient_name'] ??
-                                                              'N/A',
-                                                          style:
-                                                              const TextStyle(
-                                                                fontSize: 13,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                                color: AppTheme
-                                                                    .textDark,
-                                                              ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 8),
-                                              Row(
-                                                children: [
-                                                  Container(
-                                                    padding:
-                                                        const EdgeInsets.all(6),
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.green[50],
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            6,
-                                                          ),
-                                                    ),
-                                                    child: Icon(
-                                                      Icons.medical_services,
-                                                      size: 16,
-                                                      color: Colors.green[700],
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  Expanded(
-                                                    child: Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        Text(
-                                                          'Doctor',
-                                                          style: TextStyle(
-                                                            fontSize: 10,
-                                                            color: Colors
-                                                                .grey[600],
-                                                            fontWeight:
-                                                                FontWeight.w500,
-                                                          ),
-                                                        ),
-                                                        Text(
-                                                          order['doctor_name'] ??
-                                                              'Not Assigned',
-                                                          style: TextStyle(
-                                                            fontSize: 13,
-                                                            fontWeight:
-                                                                FontWeight.w600,
-                                                            color:
-                                                                order['doctor_name'] !=
-                                                                    null
-                                                                ? AppTheme
-                                                                      .textDark
-                                                                : Colors
-                                                                      .grey[500],
-                                                            fontStyle:
-                                                                order['doctor_name'] !=
-                                                                    null
-                                                                ? FontStyle
-                                                                      .normal
-                                                                : FontStyle
-                                                                      .italic,
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              if (order['requested_by_model'] !=
-                                                  null) ...[
-                                                const SizedBox(height: 8),
-                                                Container(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 8,
-                                                        vertical: 4,
-                                                      ),
-                                                  decoration: BoxDecoration(
-                                                    color: AppTheme
-                                                        .secondaryTeal
-                                                        .withValues(alpha: 0.1),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          6,
-                                                        ),
-                                                  ),
-                                                  child: Row(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    children: [
-                                                      Icon(
-                                                        Icons.person_add,
-                                                        size: 12,
-                                                        color: AppTheme
-                                                            .secondaryTeal,
-                                                      ),
-                                                      const SizedBox(width: 4),
-                                                      Text(
-                                                        'Requested by: ${order['requested_by_model']}',
-                                                        style: TextStyle(
-                                                          fontSize: 11,
-                                                          color: AppTheme
-                                                              .secondaryTeal,
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ],
-                                            ],
-                                          ),
-                                        ),
-
-                                        const SizedBox(height: 12),
-
-                                        // Test Count & Action
-                                        Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 12,
-                                                    vertical: 8,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                gradient: LinearGradient(
-                                                  colors: [
-                                                    AppTheme.primaryBlue
-                                                        .withValues(alpha: 0.1),
-                                                    AppTheme.primaryBlue
-                                                        .withValues(
-                                                          alpha: 0.05,
-                                                        ),
-                                                  ],
-                                                ),
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                                border: Border.all(
-                                                  color: AppTheme.primaryBlue
-                                                      .withValues(alpha: 0.2),
-                                                ),
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    Icons.science,
-                                                    size: 18,
-                                                    color: AppTheme.primaryBlue,
-                                                  ),
-                                                  const SizedBox(width: 6),
-                                                  Text(
-                                                    '${order['test_count'] ?? 0}',
-                                                    style: const TextStyle(
-                                                      fontSize: 16,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color:
-                                                          AppTheme.primaryBlue,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  Text(
-                                                    'Test${(order['test_count'] ?? 0) != 1 ? 's' : ''}',
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      color: AppTheme
-                                                          .primaryBlue
-                                                          .withValues(
-                                                            alpha: 0.8,
-                                                          ),
-                                                      fontWeight:
-                                                          FontWeight.w500,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 12,
-                                                    vertical: 8,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.primaryBlue,
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                                boxShadow: [
-                                                  BoxShadow(
-                                                    color: AppTheme.primaryBlue
-                                                        .withValues(alpha: 0.3),
-                                                    blurRadius: 4,
-                                                    offset: const Offset(0, 2),
-                                                  ),
-                                                ],
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  const Text(
-                                                    'View Details',
-                                                    style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      fontSize: 12,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  const Icon(
-                                                    Icons.arrow_forward,
-                                                    color: Colors.white,
-                                                    size: 14,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
+                              _buildOrderCardWithInvoice(order),
                               delay: Duration(milliseconds: 50 * index),
                             );
                           },
@@ -2086,6 +1500,521 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildOrderCardWithInvoice(dynamic order) {
+    final orderDate = DateTime.parse(order['order_date']);
+    final status = order['status'] ?? 'unknown';
+    final testCount = order['test_count'] ?? 0;
+    final labName = order['owner_id']?['lab_name'] ?? 'Medical Lab';
+
+    Color statusColor;
+    IconData statusIcon;
+
+    switch (status) {
+      case 'completed':
+        statusColor = AppTheme.successGreen;
+        statusIcon = Icons.check_circle;
+        break;
+      case 'processing':
+        statusColor = AppTheme.warningYellow;
+        statusIcon = Icons.hourglass_top;
+        break;
+      case 'pending':
+        statusColor = AppTheme.primaryBlue;
+        statusIcon = Icons.schedule;
+        break;
+      default:
+        statusColor = Colors.grey;
+        statusIcon = Icons.help;
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with date and lab name
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(statusIcon, color: statusColor, size: 24),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        DateFormat('MMM dd, yyyy').format(orderDate),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                      Text(
+                        labName,
+                        style: const TextStyle(
+                          color: AppTheme.textMedium,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    status.toUpperCase(),
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Order info
+            Row(
+              children: [
+                Expanded(
+                  child: _buildInfoItem(
+                    Icons.science,
+                    '$testCount Test${testCount != 1 ? 's' : ''}',
+                    'Medical tests ordered',
+                  ),
+                ),
+                if (order['total_cost'] != null)
+                  Expanded(
+                    child: _buildInfoItem(
+                      Icons.attach_money,
+                      'ILS ${order['total_cost'].toStringAsFixed(2)}',
+                      'Total cost',
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Patient & Doctor Info
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.person, size: 14, color: Colors.blue[700]),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Patient',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        order['patient_name'] ?? 'N/A',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.medical_services,
+                            size: 14,
+                            color: Colors.green[700],
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Doctor',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        order['doctor_name'] ?? 'Not Assigned',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: order['doctor_name'] != null
+                              ? AppTheme.textDark
+                              : Colors.grey[500],
+                          fontStyle: order['doctor_name'] != null
+                              ? FontStyle.normal
+                              : FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (order['order_details'] != null &&
+                order['order_details'].isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'Tests & Assigned Staff:',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ..._buildTestListWithStaff(order['order_details']),
+            ],
+            const SizedBox(height: 20),
+            // Action buttons
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _showOrderDetailsWithInvoice(order),
+                    icon: const Icon(Icons.science, size: 18),
+                    label: const Text('View Details'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryBlue,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showInvoiceDetails(order),
+                    icon: const Icon(Icons.receipt_long, size: 18),
+                    label: const Text('View Invoice'),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppTheme.primaryBlue),
+                      foregroundColor: AppTheme.primaryBlue,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoItem(IconData icon, String value, String label) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: AppTheme.primaryBlue),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textMedium,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildTestListWithStaff(List<dynamic> orderDetails) {
+    return orderDetails.take(5).map((detail) {
+      final testName = detail['test_name'] ?? 'Unknown Test';
+      final assignedStaff = detail['staff_id'];
+      final staffName = assignedStaff != null
+          ? '${assignedStaff['full_name']?['first'] ?? ''} ${assignedStaff['full_name']?['last'] ?? ''}'
+                .trim()
+          : 'Unassigned';
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey[200]!),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.science, size: 16, color: AppTheme.primaryBlue),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                testName,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppTheme.textDark,
+                ),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: assignedStaff != null
+                    ? AppTheme.successGreen.withValues(alpha: 0.1)
+                    : AppTheme.warningYellow.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                assignedStaff != null ? 'Assigned' : 'Unassigned',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: assignedStaff != null
+                      ? AppTheme.successGreen
+                      : AppTheme.warningYellow,
+                ),
+              ),
+            ),
+            if (assignedStaff != null) ...[
+              const SizedBox(width: 8),
+              Icon(Icons.person, size: 14, color: AppTheme.primaryBlue),
+              const SizedBox(width: 4),
+              Text(
+                staffName,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: AppTheme.primaryBlue,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }).toList();
+  }
+
+  void _showOrderDetailsWithInvoice(dynamic order) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          'Order #${order['_id']?.toString().substring(0, 8) ?? 'N/A'}',
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildDetailRow('Patient', order['patient_name'] ?? 'N/A'),
+              _buildDetailRow('Doctor', order['doctor_name'] ?? 'Not Assigned'),
+              _buildDetailRow(
+                'Status',
+                _getStatusText(order['status'] ?? 'pending'),
+              ),
+              _buildDetailRow(
+                'Order Date',
+                order['order_date'] != null
+                    ? DateTime.parse(
+                        order['order_date'],
+                      ).toString().split(' ')[0]
+                    : 'N/A',
+              ),
+              _buildDetailRow('Test Count', '${order['test_count'] ?? 0}'),
+              if (order['total_cost'] != null)
+                _buildDetailRow(
+                  'Total Cost',
+                  'ILS ${order['total_cost'].toStringAsFixed(2)}',
+                ),
+              if (order['barcode'] != null)
+                _buildDetailRow('Barcode', order['barcode'].toString()),
+              const SizedBox(height: 16),
+              const Text(
+                'Test Details:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              ..._buildDetailedTestList(order['order_details'] ?? []),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showInvoiceDetails(dynamic order) {
+    // For now, show a placeholder. In a real implementation, this would
+    // navigate to or show invoice details
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Invoice Details'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Order ID: ${order['_id']?.toString().substring(0, 8) ?? 'N/A'}',
+            ),
+            const SizedBox(height: 8),
+            Text('Patient: ${order['patient_name'] ?? 'N/A'}'),
+            const SizedBox(height: 8),
+            Text(
+              'Total Amount: ILS ${order['total_cost']?.toStringAsFixed(2) ?? 'N/A'}',
+            ),
+            const SizedBox(height: 8),
+            Text('Status: ${order['status'] ?? 'Unknown'}'),
+            const SizedBox(height: 16),
+            const Text(
+              'Invoice functionality coming soon...',
+              style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildDetailedTestList(List<dynamic> orderDetails) {
+    return orderDetails.map((detail) {
+      final testName = detail['test_name'] ?? 'Unknown Test';
+      final assignedStaff = detail['staff_id'];
+      final staffName = assignedStaff != null
+          ? '${assignedStaff['full_name']?['first'] ?? ''} ${assignedStaff['full_name']?['last'] ?? ''}'
+                .trim()
+          : 'Unassigned';
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              testName,
+              style: const TextStyle(
+                fontWeight: FontWeight.w500,
+                color: AppTheme.textDark,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(
+                  Icons.person,
+                  size: 14,
+                  color: assignedStaff != null
+                      ? AppTheme.primaryBlue
+                      : Colors.grey,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Staff: $staffName',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: assignedStaff != null
+                        ? AppTheme.primaryBlue
+                        : Colors.grey,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }).toList();
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              '$label:',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: AppTheme.textDark,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(color: AppTheme.textDark),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2575,18 +2504,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
           ),
         ),
         Expanded(
-          child: _isLoadingStaff
-              ? const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Loading staff...'),
-                    ],
-                  ),
-                )
-              : filteredStaff.isEmpty
+          child: filteredStaff.isEmpty
               ? Center(
                   child: Text(
                     _staffSearchController.text.isNotEmpty
@@ -2636,6 +2554,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
       test: test,
       onEdit: () => _showTestDialog(test),
       onDelete: () => _deleteTest(test['_id']),
+      onComponents: () => _showComponentsDialog(test),
     );
   }
 
@@ -2655,18 +2574,9 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
       final fullName =
           '${doctor['name']?['first'] ?? ''} ${doctor['name']?['last'] ?? ''}'
               .toLowerCase();
-      final specialization = (doctor['specialization'] ?? '')
-          .toString()
-          .toLowerCase();
-      final licenseNumber = (doctor['license_number'] ?? '')
-          .toString()
-          .toLowerCase();
       final email = (doctor['email'] ?? '').toString().toLowerCase();
 
-      return fullName.contains(searchLower) ||
-          specialization.contains(searchLower) ||
-          licenseNumber.contains(searchLower) ||
-          email.contains(searchLower);
+      return fullName.contains(searchLower) || email.contains(searchLower);
     }).toList();
 
     return Column(
@@ -2694,8 +2604,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
               TextField(
                 controller: _doctorSearchController,
                 decoration: InputDecoration(
-                  hintText:
-                      'Search by name, specialization, license, or email...',
+                  hintText: 'Search by name or email...',
                   prefixIcon: const Icon(Icons.search),
                   suffixIcon: _doctorSearchController.text.isNotEmpty
                       ? IconButton(
@@ -2730,18 +2639,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
           ),
         ),
         Expanded(
-          child: _isLoadingDoctors
-              ? const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Loading doctors...'),
-                    ],
-                  ),
-                )
-              : filteredDoctors.isEmpty
+          child: filteredDoctors.isEmpty
               ? Center(
                   child: Text(
                     _doctorSearchController.text.isNotEmpty
@@ -2838,18 +2736,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
           ),
         ),
         Expanded(
-          child: _isLoadingTests
-              ? const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Loading tests...'),
-                    ],
-                  ),
-                )
-              : filteredTests.isEmpty
+          child: filteredTests.isEmpty
               ? Center(
                   child: Text(
                     _testSearchController.text.isNotEmpty
@@ -2951,18 +2838,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
           ),
         ),
         Expanded(
-          child: _isLoadingDevices
-              ? const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Loading devices...'),
-                    ],
-                  ),
-                )
-              : filteredDevices.isEmpty
+          child: filteredDevices.isEmpty
               ? Center(
                   child: Text(
                     _deviceSearchController.text.isNotEmpty
@@ -3468,7 +3344,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
         : null;
     String gender = staff?['gender'] ?? 'Male';
     String socialStatus = staff?['social_status'] ?? 'Single';
-    String role = staff?['role'] ?? 'technician';
 
     final result = await showDialog<bool>(
       context: context,
@@ -3552,7 +3427,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                   const SizedBox(height: 16),
 
                   DropdownButtonFormField<String>(
-                    value: gender,
+                    initialValue: gender,
                     decoration: InputDecoration(
                       labelText: 'Gender *',
                       prefixIcon: const Icon(Icons.wc),
@@ -3570,7 +3445,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                   const SizedBox(height: 16),
 
                   DropdownButtonFormField<String>(
-                    value: socialStatus,
+                    initialValue: socialStatus,
                     decoration: InputDecoration(
                       labelText: 'Social Status',
                       prefixIcon: const Icon(Icons.family_restroom),
@@ -3654,30 +3529,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                     controller: employeeNumberController,
                     label: 'Employee Number',
                     prefixIcon: Icons.badge,
-                  ),
-                  const SizedBox(height: 16),
-
-                  DropdownButtonFormField<String>(
-                    value: role,
-                    decoration: InputDecoration(
-                      labelText: 'Role *',
-                      prefixIcon: const Icon(Icons.work),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'technician',
-                        child: Text('Technician'),
-                      ),
-                      DropdownMenuItem(value: 'nurse', child: Text('Nurse')),
-                      DropdownMenuItem(
-                        value: 'receptionist',
-                        child: Text('Receptionist'),
-                      ),
-                    ],
-                    onChanged: (value) => setDialogState(() => role = value!),
                   ),
                   const SizedBox(height: 16),
 
@@ -3765,7 +3616,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                     'username': usernameController.text,
                     if (staff == null && passwordController.text.isNotEmpty)
                       'password': passwordController.text,
-                    'role': role,
                     if (employeeNumberController.text.isNotEmpty)
                       'employee_number': employeeNumberController.text,
                     if (qualificationController.text.isNotEmpty)
@@ -3871,138 +3721,248 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
 
   void _showDoctorDialog([Map<String, dynamic>? doctor]) async {
     final firstNameController = TextEditingController(
-      text: doctor?['full_name']?['first'],
+      text: doctor?['name']?['first'],
+    );
+    final middleNameController = TextEditingController(
+      text: doctor?['name']?['middle'],
     );
     final lastNameController = TextEditingController(
-      text: doctor?['full_name']?['last'],
+      text: doctor?['name']?['last'],
     );
     final emailController = TextEditingController(text: doctor?['email']);
-    final phoneController = TextEditingController(text: doctor?['phone']);
+    final phoneController = TextEditingController(
+      text: doctor?['phone_number'],
+    );
     final usernameController = TextEditingController(text: doctor?['username']);
-    final specialtyController = TextEditingController(
-      text: doctor?['specialty'],
+    final passwordController = TextEditingController();
+    final identityController = TextEditingController(
+      text: doctor?['identity_number'],
     );
-    final licenseController = TextEditingController(
-      text: doctor?['license_number'],
-    );
+    DateTime? selectedBirthday = doctor?['birthday'] != null
+        ? DateTime.parse(doctor!['birthday'])
+        : null;
+    String selectedGender = doctor?['gender'] ?? 'Male';
 
     final result = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(doctor == null ? 'Add Doctor' : 'Edit Doctor'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CustomTextField(
-                controller: firstNameController,
-                label: 'First Name',
-                prefixIcon: Icons.person,
-              ),
-              const SizedBox(height: 16),
-              CustomTextField(
-                controller: lastNameController,
-                label: 'Last Name',
-                prefixIcon: Icons.person_outline,
-              ),
-              const SizedBox(height: 16),
-              CustomTextField(
-                controller: emailController,
-                label: 'Email',
-                prefixIcon: Icons.email,
-                keyboardType: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: 16),
-              CustomTextField(
-                controller: phoneController,
-                label: 'Phone',
-                prefixIcon: Icons.phone,
-                keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: 16),
-              CustomTextField(
-                controller: usernameController,
-                label: 'Username',
-                prefixIcon: Icons.account_circle,
-              ),
-              const SizedBox(height: 16),
-              CustomTextField(
-                controller: specialtyController,
-                label: 'Specialty',
-                prefixIcon: Icons.medical_services,
-              ),
-              const SizedBox(height: 16),
-              CustomTextField(
-                controller: licenseController,
-                label: 'License Number',
-                prefixIcon: Icons.card_membership,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (firstNameController.text.isEmpty ||
-                  emailController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('First name and email are required'),
-                  ),
-                );
-                return;
-              }
-
-              LoadingDialog.show(context);
-              try {
-                final data = {
-                  'full_name': {
-                    'first': firstNameController.text,
-                    'last': lastNameController.text,
-                  },
-                  'email': emailController.text,
-                  'phone': phoneController.text,
-                  'username': usernameController.text,
-                  'specialty': specialtyController.text,
-                  'license_number': licenseController.text,
-                };
-
-                final response = doctor == null
-                    ? await OwnerApiService.createDoctor(data)
-                    : await OwnerApiService.updateDoctor(doctor['_id'], data);
-
-                if (!context.mounted) return;
-                LoadingDialog.hide(context);
-                if (response['message'] != null) {
-                  if (context.mounted) {
-                    Navigator.pop(context, true);
-                    _loadDoctors();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          doctor == null
-                              ? 'Doctor created successfully'
-                              : 'Doctor updated successfully',
-                        ),
-                      ),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text(doctor == null ? 'Add Doctor' : 'Edit Doctor'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CustomTextField(
+                  controller: firstNameController,
+                  label: 'First Name *',
+                  prefixIcon: Icons.person,
+                ),
+                const SizedBox(height: 16),
+                CustomTextField(
+                  controller: middleNameController,
+                  label: 'Middle Name',
+                  prefixIcon: Icons.person_outline,
+                ),
+                const SizedBox(height: 16),
+                CustomTextField(
+                  controller: lastNameController,
+                  label: 'Last Name *',
+                  prefixIcon: Icons.person_outline,
+                ),
+                const SizedBox(height: 16),
+                CustomTextField(
+                  controller: identityController,
+                  label: 'Identity Number *',
+                  prefixIcon: Icons.badge,
+                ),
+                const SizedBox(height: 16),
+                InkWell(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: selectedBirthday ?? DateTime(1990),
+                      firstDate: DateTime(1950),
+                      lastDate: DateTime.now(),
                     );
-                  }
-                }
-              } catch (e) {
-                if (!context.mounted) return;
-                LoadingDialog.hide(context);
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(SnackBar(content: Text('Error: $e')));
-              }
-            },
-            child: Text(doctor == null ? 'Create' : 'Update'),
+                    if (picked != null) {
+                      setState(() => selectedBirthday = picked);
+                    }
+                  },
+                  child: InputDecorator(
+                    decoration: InputDecoration(
+                      labelText: 'Birthday *',
+                      prefixIcon: const Icon(Icons.calendar_today),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      selectedBirthday != null
+                          ? '${selectedBirthday!.day}/${selectedBirthday!.month}/${selectedBirthday!.year}'
+                          : 'Select birthday',
+                      style: TextStyle(
+                        color: selectedBirthday != null
+                            ? Colors.black
+                            : Colors.grey,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedGender,
+                  decoration: InputDecoration(
+                    labelText: 'Gender *',
+                    prefixIcon: const Icon(Icons.person),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  items: ['Male', 'Female', 'Other'].map((gender) {
+                    return DropdownMenuItem(value: gender, child: Text(gender));
+                  }).toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      selectedGender = value!;
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                CustomTextField(
+                  controller: emailController,
+                  label: 'Email *',
+                  prefixIcon: Icons.email,
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                const SizedBox(height: 16),
+                CustomTextField(
+                  controller: phoneController,
+                  label: 'Phone *',
+                  prefixIcon: Icons.phone,
+                  keyboardType: TextInputType.phone,
+                ),
+                const SizedBox(height: 16),
+                CustomTextField(
+                  controller: usernameController,
+                  label: 'Username *',
+                  prefixIcon: Icons.account_circle,
+                ),
+                if (doctor == null) ...[
+                  const SizedBox(height: 16),
+                  CustomTextField(
+                    controller: passwordController,
+                    label: 'Password *',
+                    prefixIcon: Icons.lock,
+                    obscureText: true,
+                  ),
+                ],
+              ],
+            ),
           ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (firstNameController.text.isEmpty ||
+                    lastNameController.text.isEmpty ||
+                    emailController.text.isEmpty ||
+                    usernameController.text.isEmpty ||
+                    identityController.text.isEmpty ||
+                    phoneController.text.isEmpty ||
+                    selectedBirthday == null ||
+                    (doctor == null && passwordController.text.isEmpty)) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please fill all required fields (*)'),
+                    ),
+                  );
+                  return;
+                }
+
+                LoadingDialog.show(context);
+                try {
+                  final data = doctor == null
+                      ? {
+                          'full_name': {
+                            'first': firstNameController.text,
+                            'middle': middleNameController.text,
+                            'last': lastNameController.text,
+                          },
+                          'identity_number': identityController.text,
+                          'birthday':
+                              '${selectedBirthday!.year}-${selectedBirthday!.month.toString().padLeft(2, '0')}-${selectedBirthday!.day.toString().padLeft(2, '0')}',
+                          'gender': selectedGender,
+                          'email': emailController.text,
+                          'phone': phoneController.text,
+                          'username': usernameController.text,
+                          'password': passwordController.text,
+                        }
+                      : {
+                          'name': {
+                            'first': firstNameController.text,
+                            'middle': middleNameController.text,
+                            'last': lastNameController.text,
+                          },
+                          'identity_number': identityController.text,
+                          'birthday':
+                              '${selectedBirthday!.year}-${selectedBirthday!.month.toString().padLeft(2, '0')}-${selectedBirthday!.day.toString().padLeft(2, '0')}',
+                          'gender': selectedGender,
+                          'email': emailController.text,
+                          'phone_number': phoneController.text,
+                          'username': usernameController.text,
+                        };
+
+                  final response = doctor == null
+                      ? await OwnerApiService.createDoctor(data)
+                      : await OwnerApiService.updateDoctor(doctor['_id'], data);
+
+                  if (!context.mounted) return;
+                  LoadingDialog.hide(context);
+
+                  if (response['message'] != null &&
+                      !response['message'].toString().contains('⚠️') &&
+                      !response['message'].toString().contains('❌')) {
+                    if (context.mounted) {
+                      Navigator.pop(context, true);
+                      _loadDoctors();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            doctor == null
+                                ? 'Doctor created successfully'
+                                : 'Doctor updated successfully',
+                          ),
+                        ),
+                      );
+                    }
+                  } else {
+                    // Show error message from server
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            response['message'] ?? 'Error occurred',
+                          ),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
+                } catch (e) {
+                  if (!context.mounted) return;
+                  LoadingDialog.hide(context);
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
+              },
+              child: Text(doctor == null ? 'Create' : 'Update'),
+            ),
+          ],
+        ),
       ),
     );
 
@@ -4072,6 +4032,9 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     );
     final tubeTypeController = TextEditingController(text: test?['tube_type']);
     final reagentController = TextEditingController(text: test?['reagent']);
+    final sampleTypeController = TextEditingController(
+      text: test?['sample_type'],
+    );
     String? selectedDevice = test?['device_id'];
 
     final result = await showDialog<bool>(
@@ -4141,7 +4104,14 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                   prefixIcon: Icons.liquor,
                 ),
                 const SizedBox(height: 16),
+                CustomTextField(
+                  controller: sampleTypeController,
+                  label: 'Sample Type (e.g., Blood, Urine)',
+                  prefixIcon: Icons.bloodtype,
+                ),
+                const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
+                  isExpanded: true,
                   initialValue: selectedDevice,
                   decoration: InputDecoration(
                     labelText: 'Device (Optional)',
@@ -4158,7 +4128,10 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                     ..._devices.map(
                       (device) => DropdownMenuItem<String>(
                         value: device['_id'],
-                        child: Text(device['name']),
+                        child: Text(
+                          device['name'],
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ),
                   ],
@@ -4201,6 +4174,9 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                     'reference_range': referenceRangeController.text,
                     'tube_type': tubeTypeController.text,
                     'reagent': reagentController.text,
+                    'sample_type': sampleTypeController.text.isNotEmpty
+                        ? sampleTypeController.text
+                        : 'Blood',
                     if (selectedDevice != null) 'device_id': selectedDevice,
                   };
 
@@ -4492,8 +4468,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
   Future<void> _loadOrdersInBackground() async {
     if (!mounted) return;
 
-    setState(() => _isLoadingOrders = true);
-
     try {
       final authProvider = Provider.of<OwnerAuthProvider>(
         context,
@@ -4508,7 +4482,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
       if (mounted) {
         setState(() {
           _orders = List<Map<String, dynamic>>.from(response['orders'] ?? []);
-          _isLoadingOrders = false;
           _ordersError = null;
         });
       }
@@ -4516,7 +4489,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
       if (mounted) {
         setState(() {
           _ordersError = 'Failed to load orders: $e';
-          _isLoadingOrders = false;
         });
       }
     }
@@ -4655,7 +4627,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                             ),
                           ),
                           Text(
-                            '#${order['_id']?.toString().substring(0, 8) ?? 'N/A'}',
+                            '#${order['_id']?.toString().substring(0, min(8, order['_id']?.toString().length ?? 0)) ?? 'N/A'}',
                             style: TextStyle(
                               fontSize: 14,
                               color: Colors.white.withValues(alpha: 0.9),
@@ -5569,6 +5541,411 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Failed to load reports: $e')));
+    }
+  }
+
+  Future<void> _showComponentsDialog(Map<String, dynamic> test) async {
+    List<Map<String, dynamic>> components = [];
+    bool isLoading = true;
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          if (isLoading) {
+            OwnerApiService.getTestComponents(test['_id'])
+                .then((response) {
+                  if (response['components'] != null) {
+                    setDialogState(() {
+                      components = List<Map<String, dynamic>>.from(
+                        response['components'],
+                      );
+                      isLoading = false;
+                    });
+                  }
+                })
+                .catchError((e) {
+                  setDialogState(() => isLoading = false);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error loading components: $e')),
+                    );
+                  }
+                });
+          }
+
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(Icons.view_list, color: Colors.green),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Test Components',
+                        style: const TextStyle(fontSize: 18),
+                      ),
+                      Text(
+                        test['test_name'],
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.normal,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 400,
+              child: isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : components.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.science_outlined,
+                            size: 64,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'No components yet',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Add components for multi-parameter tests',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: components.length,
+                      itemBuilder: (context, index) {
+                        final component = components[index];
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: Colors.green[100],
+                              child: Text(
+                                '${index + 1}',
+                                style: TextStyle(
+                                  color: Colors.green[800],
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            title: Text(
+                              component['component_name'] ?? '',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Code: ${component['component_code'] ?? 'N/A'}',
+                                ),
+                                Text('Units: ${component['units'] ?? 'N/A'}'),
+                                Text(
+                                  'Range: ${component['reference_range'] ?? 'N/A'}',
+                                  style: TextStyle(
+                                    color: Colors.green[700],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.edit,
+                                    color: Colors.blue,
+                                    size: 20,
+                                  ),
+                                  onPressed: () {
+                                    Navigator.pop(dialogContext);
+                                    _showComponentFormDialog(
+                                      test,
+                                      component,
+                                    ).then((_) => _showComponentsDialog(test));
+                                  },
+                                  tooltip: 'Edit Component',
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.delete,
+                                    color: Colors.red,
+                                    size: 20,
+                                  ),
+                                  onPressed: () =>
+                                      _deleteComponent(
+                                        test['_id'],
+                                        component['_id'],
+                                      ).then((_) {
+                                        setDialogState(
+                                          () => components.removeAt(index),
+                                        );
+                                      }),
+                                  tooltip: 'Delete Component',
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Close'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _showComponentFormDialog(
+                    test,
+                  ).then((_) => _showComponentsDialog(test));
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Add Component'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showComponentFormDialog(
+    Map<String, dynamic> test, [
+    Map<String, dynamic>? component,
+  ]) async {
+    final nameController = TextEditingController(
+      text: component?['component_name'],
+    );
+    final codeController = TextEditingController(
+      text: component?['component_code'],
+    );
+    final unitsController = TextEditingController(text: component?['units']);
+    final rangeController = TextEditingController(
+      text: component?['reference_range'],
+    );
+    final minController = TextEditingController(
+      text: component?['min_value']?.toString(),
+    );
+    final maxController = TextEditingController(
+      text: component?['max_value']?.toString(),
+    );
+    final orderController = TextEditingController(
+      text: component?['display_order']?.toString(),
+    );
+    final descController = TextEditingController(
+      text: component?['description'],
+    );
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(component == null ? 'Add Component' : 'Edit Component'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CustomTextField(
+                controller: nameController,
+                label: 'Component Name *',
+                prefixIcon: Icons.science,
+              ),
+              const SizedBox(height: 16),
+              CustomTextField(
+                controller: codeController,
+                label: 'Component Code *',
+                prefixIcon: Icons.code,
+              ),
+              const SizedBox(height: 16),
+              CustomTextField(
+                controller: unitsController,
+                label: 'Units (e.g., mg/dL, 10^3/μL)',
+                prefixIcon: Icons.straighten,
+              ),
+              const SizedBox(height: 16),
+              CustomTextField(
+                controller: rangeController,
+                label: 'Reference Range (e.g., 4.5-11.0)',
+                prefixIcon: Icons.assessment,
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: CustomTextField(
+                      controller: minController,
+                      label: 'Min Value',
+                      prefixIcon: Icons.arrow_downward,
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: CustomTextField(
+                      controller: maxController,
+                      label: 'Max Value',
+                      prefixIcon: Icons.arrow_upward,
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              CustomTextField(
+                controller: orderController,
+                label: 'Display Order',
+                prefixIcon: Icons.format_list_numbered,
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+              CustomTextField(
+                controller: descController,
+                label: 'Description (Optional)',
+                prefixIcon: Icons.description,
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (nameController.text.isEmpty || codeController.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Component name and code are required'),
+                  ),
+                );
+                return;
+              }
+
+              LoadingDialog.show(context);
+              try {
+                final data = {
+                  'component_name': nameController.text,
+                  'component_code': codeController.text,
+                  if (unitsController.text.isNotEmpty)
+                    'units': unitsController.text,
+                  if (rangeController.text.isNotEmpty)
+                    'reference_range': rangeController.text,
+                  if (minController.text.isNotEmpty)
+                    'min_value': double.tryParse(minController.text),
+                  if (maxController.text.isNotEmpty)
+                    'max_value': double.tryParse(maxController.text),
+                  if (orderController.text.isNotEmpty)
+                    'display_order': int.tryParse(orderController.text),
+                  if (descController.text.isNotEmpty)
+                    'description': descController.text,
+                };
+
+                final response = component == null
+                    ? await OwnerApiService.addTestComponent(test['_id'], data)
+                    : await OwnerApiService.updateTestComponent(
+                        test['_id'],
+                        component['_id'],
+                        data,
+                      );
+
+                if (!context.mounted) return;
+                LoadingDialog.hide(context);
+
+                if (response['message'] != null ||
+                    response['component'] != null) {
+                  Navigator.pop(context);
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        component == null
+                            ? 'Component added successfully'
+                            : 'Component updated successfully',
+                      ),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (!context.mounted) return;
+                LoadingDialog.hide(context);
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Error: $e')));
+              }
+            },
+            child: Text(component == null ? 'Add' : 'Update'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteComponent(String testId, String componentId) async {
+    final confirm = await ConfirmationDialog.show(
+      context,
+      title: 'Delete Component',
+      message: 'Are you sure you want to delete this component?',
+      confirmText: 'Delete',
+      confirmColor: Colors.red,
+      icon: Icons.delete,
+    );
+
+    if (!confirm) return;
+
+    LoadingDialog.show(context);
+    try {
+      final response = await OwnerApiService.deleteTestComponent(
+        testId,
+        componentId,
+      );
+
+      if (!context.mounted) return;
+      LoadingDialog.hide(context);
+
+      if (response['message'] != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Component deleted successfully')),
+        );
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      LoadingDialog.hide(context);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
 }
@@ -7072,26 +7449,6 @@ class _DoctorCardExpandedState extends State<_DoctorCardExpanded> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildDetailSection('Professional Information', [
-                    _buildDetailRow(
-                      Icons.card_membership,
-                      'License Number',
-                      doctor['license_number'] ?? 'N/A',
-                    ),
-                    _buildDetailRow(
-                      Icons.medical_services,
-                      'Specialization',
-                      doctor['specialization'] ?? 'N/A',
-                    ),
-                    if (doctor['years_of_experience'] != null)
-                      _buildDetailRow(
-                        Icons.work_history,
-                        'Experience',
-                        '${doctor['years_of_experience']} years',
-                      ),
-                  ]),
-                  const Divider(height: 32),
-
                   _buildDetailSection('Contact Information', [
                     _buildDetailRow(
                       Icons.email,
@@ -7101,7 +7458,7 @@ class _DoctorCardExpandedState extends State<_DoctorCardExpanded> {
                     _buildDetailRow(
                       Icons.phone,
                       'Phone',
-                      doctor['phone'] ?? 'N/A',
+                      doctor['phone_number'] ?? 'N/A',
                     ),
                   ]),
 
@@ -7149,11 +7506,13 @@ class _TestCardExpanded extends StatefulWidget {
   final Map<String, dynamic> test;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final VoidCallback onComponents;
 
   const _TestCardExpanded({
     required this.test,
     required this.onEdit,
     required this.onDelete,
+    required this.onComponents,
   });
 
   @override
@@ -7366,6 +7725,15 @@ class _TestCardExpandedState extends State<_TestCardExpanded> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
+                      OutlinedButton.icon(
+                        onPressed: widget.onComponents,
+                        icon: const Icon(Icons.list_alt, size: 18),
+                        label: const Text('Components'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.green,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
                       OutlinedButton.icon(
                         onPressed: widget.onEdit,
                         icon: const Icon(Icons.edit, size: 18),

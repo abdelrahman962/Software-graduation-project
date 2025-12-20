@@ -38,11 +38,14 @@ class ApiService {
     Map<String, dynamic> body,
   ) async {
     final url = Uri.parse('${ApiConfig.baseUrl}$endpoint');
-    final response = await http.post(
-      url,
-      headers: _getHeaders(),
-      body: jsonEncode(body),
-    );
+    final response = await http
+        .post(url, headers: _getHeaders(), body: jsonEncode(body))
+        .timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            throw Exception('Request timeout - please check your connection');
+          },
+        );
 
     return _handleResponse(response);
   }
@@ -56,7 +59,14 @@ class ApiService {
     if (params != null && params.isNotEmpty) {
       uri = uri.replace(queryParameters: params);
     }
-    final response = await http.get(uri, headers: _getHeaders());
+    final response = await http
+        .get(uri, headers: _getHeaders())
+        .timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            throw Exception('Request timeout - please check your connection');
+          },
+        );
 
     return _handleResponse(response);
   }
@@ -95,13 +105,20 @@ class ApiService {
   // Admin lab owner management
   static Future<Map<String, dynamic>> approveLabOwner(
     String ownerId, {
-    String? rejectionReason,
+    String? subscriptionEnd,
+    double? subscriptionFee,
   }) async {
     final endpoint = ApiConfig.adminApproveLabOwner(ownerId);
-    return await put(
-      endpoint,
-      rejectionReason != null ? {'rejection_reason': rejectionReason} : {},
-    );
+
+    // Calculate subscription end date (1 month from now) if not provided
+    final endDate =
+        subscriptionEnd ??
+        DateTime.now().add(const Duration(days: 30)).toIso8601String();
+
+    return await put(endpoint, {
+      'subscription_end': endDate,
+      if (subscriptionFee != null) 'subscriptionFee': subscriptionFee,
+    });
   }
 
   static Future<Map<String, dynamic>> rejectLabOwner(

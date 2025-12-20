@@ -7,6 +7,12 @@ const ownerSchema = new mongoose.Schema({
       default: 100, // Default fee, can be changed per owner
       min: 0
     },
+  subscription_period_months: {
+    type: Number,
+    default: 1,
+    min: 1,
+    max: 12
+  },
   lab_name: {
     type: String,
     required: true,
@@ -14,6 +20,14 @@ const ownerSchema = new mongoose.Schema({
       // Auto-generate from name if not provided
       return `${this.name.first} ${this.name.middle ? this.name.middle + ' ' : ''}${this.name.last}`.trim();
     }
+  },
+  lab_license_number: {
+    type: String
+  },
+  owner_id: {
+    type: String,
+    unique: true,
+    sparse: true // Allow null values initially
   },
   name: {
     first: { type: String, required: true },
@@ -58,9 +72,12 @@ const ownerSchema = new mongoose.Schema({
     unique: true 
   },
   username: { 
-    type: String, 
-    required: true, 
+    type: String,
+    required: function() {
+      return this.status === 'approved';
+    },
     unique: true,
+    sparse: true, // Allow multiple null values for pending owners
     lowercase: true,
     trim: true,
     validate: {
@@ -72,7 +89,9 @@ const ownerSchema = new mongoose.Schema({
   },
   password: { 
     type: String, 
-    required: true 
+    required: function() {
+      return this.status === 'approved';
+    }
   },
   date_subscription: { 
     type: Date, 
@@ -92,6 +111,13 @@ const ownerSchema = new mongoose.Schema({
     type: String, 
     enum: ['pending', 'approved', 'rejected'],
     default: 'pending'
+  },
+  rejection_reason: {
+    type: String
+  },
+  temp_credentials: {
+    username: { type: String },
+    password: { type: String }
   }
 }, {
   timestamps: true
@@ -109,7 +135,7 @@ ownerSchema.pre('save', async function(next) {
       mongoose.model('Doctor').findOne({ username: this.username }),
       mongoose.model('Staff').findOne({ username: this.username }),
       mongoose.model('Admin').findOne({ username: this.username }),
-      mongoose.model('Owner').findOne({ username: this.username, _id: { $ne: this._id } })
+      mongoose.model('LabOwner').findOne({ username: this.username, _id: { $ne: this._id } })
     ]);
     
     if (existingUsers.some(user => user !== null)) {
@@ -131,4 +157,19 @@ ownerSchema.methods.comparePassword = async function(password) {
   return bcrypt.compare(password, this.password);
 };
 
-module.exports = mongoose.model('LabOwner', ownerSchema);
+// Set collection name to match existing data
+ownerSchema.set('collection', 'labowners');
+
+// Register as 'Owner' for populate compatibility
+try {
+  module.exports = mongoose.model('Owner');
+} catch (e) {
+  module.exports = mongoose.model('Owner', ownerSchema);
+}
+
+// Also register as 'LabOwner' for backward compatibility
+try {
+  mongoose.model('LabOwner');
+} catch (e) {
+  mongoose.model('LabOwner', ownerSchema);
+}

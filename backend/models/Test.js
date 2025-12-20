@@ -7,7 +7,7 @@ const testSchema = new mongoose.Schema({
   tube_type: String,
   is_active: { type: Boolean, default: true },
   device_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Device' },
-  method: { type: String, enum: ['manual','device'] },
+  method: String,
   units: String,
   reference_range: String,
   price: Number,

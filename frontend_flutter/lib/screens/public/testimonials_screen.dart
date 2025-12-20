@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/marketing_provider.dart';
 import '../../models/feedback.dart' as feedback_model;
+import '../../widgets/animations.dart';
 
 class TestimonialsScreen extends StatefulWidget {
   const TestimonialsScreen({super.key});
@@ -12,6 +13,11 @@ class TestimonialsScreen extends StatefulWidget {
 
 class _TestimonialsScreenState extends State<TestimonialsScreen> {
   String _selectedRole = 'All';
+
+  bool get _isMobile {
+    final screenWidth = MediaQuery.of(context).size.width;
+    return screenWidth < 768; // Tablet breakpoint
+  }
 
   @override
   void initState() {
@@ -50,7 +56,7 @@ class _TestimonialsScreenState extends State<TestimonialsScreen> {
               gradient: LinearGradient(
                 colors: [
                   Theme.of(context).primaryColor,
-                  Theme.of(context).primaryColor.withOpacity(0.7),
+                  Theme.of(context).primaryColor.withValues(alpha: 0.7),
                 ],
               ),
             ),
@@ -72,7 +78,7 @@ class _TestimonialsScreenState extends State<TestimonialsScreen> {
                   'Real feedback from real users across all roles',
                   style: TextStyle(
                     fontSize: 16,
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                   ),
                 ),
               ],
@@ -97,7 +103,7 @@ class _TestimonialsScreenState extends State<TestimonialsScreen> {
                       },
                       selectedColor: Theme.of(
                         context,
-                      ).primaryColor.withOpacity(0.2),
+                      ).primaryColor.withValues(alpha: 0.2),
                       checkmarkColor: Theme.of(context).primaryColor,
                     ),
                   );
@@ -198,15 +204,14 @@ class _TestimonialsScreenState extends State<TestimonialsScreen> {
                         minRating: 4,
                       );
                     },
-                    child: ListView.builder(
+                    child: AnimatedGridView(
+                      crossAxisCount: _isMobile ? 1 : 3,
+                      mainAxisSpacing: 24,
+                      crossAxisSpacing: 24,
                       padding: const EdgeInsets.all(16),
-                      itemCount: filteredFeedback.length,
-                      itemBuilder: (context, index) {
-                        return _buildTestimonialCard(
-                          context,
-                          filteredFeedback[index],
-                        );
-                      },
+                      children: filteredFeedback.map((feedback) {
+                        return _buildTestimonialCard(context, feedback);
+                      }).toList(),
                     ),
                   ),
           ),
@@ -241,115 +246,118 @@ class _TestimonialsScreenState extends State<TestimonialsScreen> {
     BuildContext context,
     feedback_model.Feedback feedback,
   ) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    return AnimatedCard(
+      margin: const EdgeInsets.only(bottom: 24),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(32),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Header with user role badge and rating
-            Row(
-              children: [
-                _buildRoleBadge(feedback.userModel),
-                const Spacer(),
-                _buildStarRating(feedback.rating),
-              ],
+            // Star rating icon
+            AppAnimations.bounce(
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(5, (index) {
+                  return Icon(
+                    index < feedback.rating ? Icons.star : Icons.star_border,
+                    color: Colors.amber,
+                    size: 24,
+                  );
+                }),
+              ),
             ),
-            const SizedBox(height: 12),
-
+            const SizedBox(height: 16),
+            // User name and role (if not anonymous)
+            if (!feedback.isAnonymous)
+              AppAnimations.fadeIn(
+                Column(
+                  children: [
+                    Text(
+                      _getUserDisplayName(feedback),
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: _getRoleColor(feedback.userModel),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _getRoleColor(
+                          feedback.userModel,
+                        ).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: _getRoleColor(
+                            feedback.userModel,
+                          ).withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _getRoleIcon(feedback.userModel),
+                            size: 16,
+                            color: _getRoleColor(feedback.userModel),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            feedback.userModel,
+                            style: TextStyle(
+                              color: _getRoleColor(feedback.userModel),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                delay: const Duration(milliseconds: 200),
+              )
+            else
+              AppAnimations.fadeIn(
+                Text(
+                  'Anonymous ${feedback.userModel}',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                delay: const Duration(milliseconds: 200),
+              ),
+            const SizedBox(height: 16),
             // Feedback message
-            Text(
-              feedback.message ?? '',
-              style: const TextStyle(fontSize: 16, height: 1.5),
+            AppAnimations.fadeIn(
+              Text(
+                feedback.message ?? '',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.copyWith(height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+              delay: const Duration(milliseconds: 400),
             ),
             const SizedBox(height: 12),
-
-            // User name and date
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: _getRoleColor(
-                    feedback.userModel,
-                  ).withOpacity(0.2),
-                  child: Icon(
-                    _getRoleIcon(feedback.userModel),
-                    size: 16,
-                    color: _getRoleColor(feedback.userModel),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _getUserDisplayName(feedback),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                      Text(
-                        _formatDate(feedback.createdAt),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            // Date
+            AppAnimations.fadeIn(
+              Text(
+                _formatDate(feedback.createdAt),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                textAlign: TextAlign.center,
+              ),
+              delay: const Duration(milliseconds: 600),
             ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildRoleBadge(String role) {
-    final color = _getRoleColor(role);
-    final icon = _getRoleIcon(role);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
-          Text(
-            role,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStarRating(int rating) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(5, (index) {
-        return Icon(
-          index < rating ? Icons.star : Icons.star_border,
-          color: Colors.amber,
-          size: 20,
-        );
-      }),
     );
   }
 
@@ -388,6 +396,12 @@ class _TestimonialsScreenState extends State<TestimonialsScreen> {
       return 'Anonymous ${feedback.userModel}';
     }
 
+    // Use the direct userName from backend if available
+    if (feedback.userName != null && feedback.userName!.isNotEmpty) {
+      return feedback.userName!;
+    }
+
+    // Fallback to user object if populated
     if (feedback.user != null && feedback.user!['full_name'] != null) {
       final fullName = feedback.user!['full_name'];
       if (fullName['first'] != null && fullName['last'] != null) {

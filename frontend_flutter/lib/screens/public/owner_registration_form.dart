@@ -28,8 +28,6 @@ class _OwnerRegistrationFormState extends State<OwnerRegistrationForm> {
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
   final _emailController = TextEditingController();
-  final _usernameController = TextEditingController();
-  final _passwordController = TextEditingController();
   bool _isLoading = false;
 
   @override
@@ -43,8 +41,6 @@ class _OwnerRegistrationFormState extends State<OwnerRegistrationForm> {
     _phoneController.dispose();
     _addressController.dispose();
     _emailController.dispose();
-    _usernameController.dispose();
-    _passwordController.dispose();
     super.dispose();
   }
 
@@ -61,19 +57,17 @@ class _OwnerRegistrationFormState extends State<OwnerRegistrationForm> {
       phone: _phoneController.text,
       address: _addressController.text,
       email: _emailController.text,
-      username: _usernameController.text,
-      password: _passwordController.text,
       selectedPlan: widget.selectedPlan,
     );
     setState(() => _isLoading = false);
-    if (response['success'] != false) {
+    if (mounted && response['success'] != false) {
       showDialog(
         context: context,
         barrierDismissible: false,
         builder: (context) => AlertDialog(
           title: const Text('Request Submitted'),
           content: Text(
-            'Your registration request has been submitted. We will contact you soon.',
+            'Your registration request has been submitted. You will be notified via email once approved by an administrator.',
           ),
           actions: [
             ElevatedButton(
@@ -83,7 +77,7 @@ class _OwnerRegistrationFormState extends State<OwnerRegistrationForm> {
           ],
         ),
       );
-    } else {
+    } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(response['message'] ?? 'Registration failed')),
       );
@@ -162,16 +156,22 @@ class _OwnerRegistrationFormState extends State<OwnerRegistrationForm> {
               decoration: const InputDecoration(labelText: 'Email'),
               validator: (v) => v == null || v.isEmpty ? 'Required' : null,
             ),
-            TextFormField(
-              controller: _usernameController,
-              decoration: const InputDecoration(labelText: 'Username'),
-              validator: (v) => v == null || v.isEmpty ? 'Required' : null,
-            ),
-            TextFormField(
-              controller: _passwordController,
-              decoration: const InputDecoration(labelText: 'Password'),
-              obscureText: true,
-              validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: const Text(
+                'Note: Your registration request will be reviewed by an administrator. You will be notified via email once approved.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.blue,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
             ),
             const SizedBox(height: 24),
             ElevatedButton(

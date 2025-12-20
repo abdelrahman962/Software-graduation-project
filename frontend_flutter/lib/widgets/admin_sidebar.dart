@@ -148,12 +148,6 @@ class _AdminSidebarState extends State<AdminSidebar> {
                     index: 5,
                     badge: null,
                   ),
-                  // _buildNavItem(
-                  //   icon: Icons.settings,
-                  //   title: 'Settings',
-                  //   index: 8,
-                  //   badge: null,
-                  // ),
                 ]),
               ],
             ),

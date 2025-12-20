@@ -380,4 +380,50 @@ router.post(
  */
 router.get('/feedback', authMiddleware, roleMiddleware(['owner']), ownerController.getMyFeedback);
 
+// ==================== TEST COMPONENT ROUTES ====================
+
+/**
+ * @route   POST /api/owner/tests/:testId/components
+ * @desc    Add component to a test
+ * @access  Private (Owner)
+ */
+router.post('/tests/:testId/components', authMiddleware, roleMiddleware(['owner']), ownerController.addTestComponent);
+
+/**
+ * @route   GET /api/owner/tests/:testId/components
+ * @desc    Get all components for a test
+ * @access  Private (Owner)
+ */
+router.get('/tests/:testId/components', authMiddleware, roleMiddleware(['owner']), ownerController.getTestComponents);
+
+/**
+ * @route   PUT /api/owner/tests/:testId/components/:componentId
+ * @desc    Update a test component
+ * @access  Private (Owner)
+ */
+router.put('/tests/:testId/components/:componentId', authMiddleware, roleMiddleware(['owner']), ownerController.updateTestComponent);
+
+/**
+ * @route   DELETE /api/owner/tests/:testId/components/:componentId
+ * @desc    Delete a test component
+ * @access  Private (Owner)
+ */
+router.delete('/tests/:testId/components/:componentId', authMiddleware, roleMiddleware(['owner']), ownerController.deleteTestComponent);
+
+// ==================== RESULTS & INVOICES ROUTES ====================
+
+/**
+ * @route   GET /api/owner/results
+ * @desc    Get all results for owner's lab
+ * @access  Private (Owner)
+ */
+router.get('/results', authMiddleware, roleMiddleware(['owner']), ownerController.getAllResults);
+
+/**
+ * @route   GET /api/owner/invoices
+ * @desc    Get all invoices for owner's lab
+ * @access  Private (Owner)
+ */
+router.get('/invoices', authMiddleware, roleMiddleware(['owner']), ownerController.getAllInvoices);
+
 module.exports = router;

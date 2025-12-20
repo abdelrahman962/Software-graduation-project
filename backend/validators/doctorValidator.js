@@ -43,7 +43,7 @@ exports.validateRequestTest = [
 
 // Mark Test Urgent Validation
 exports.validateMarkUrgent = [
-  param('order_id')
+  param('orderId')
     .trim()
     .isMongoId().withMessage('Invalid order ID format')
 ];

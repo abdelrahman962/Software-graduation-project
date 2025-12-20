@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
 import '../../widgets/common/navbar.dart';
 import '../../widgets/common/footer.dart';
 import '../../widgets/animations.dart';
@@ -210,128 +211,205 @@ class _ContactScreenState extends State<ContactScreen> {
   }
 
   Widget _buildContactForm(BuildContext context) {
-    return AnimatedCard(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              AppAnimations.fadeIn(
-                Text(
-                  'Tell Us About Your Laboratory',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+    return Column(
+      children: [
+        // Registration CTA
+        AppAnimations.fadeIn(
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Theme.of(context).colorScheme.primary,
+                  Theme.of(context).colorScheme.secondary,
+                ],
+              ),
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                const Icon(
+                  Icons.business_center,
+                  size: 48,
+                  color: Colors.white,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Ready to Register Your Laboratory?',
+                  style: TextStyle(
+                    fontSize: 22,
                     fontWeight: FontWeight.bold,
+                    color: Colors.white,
                   ),
+                  textAlign: TextAlign.center,
                 ),
-              ),
-              const SizedBox(height: 32),
-              AppAnimations.slideInFromLeft(
-                TextFormField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Full Name *',
-                    prefixIcon: Icon(Icons.person),
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your name';
-                    }
-                    return null;
+                const SizedBox(height: 8),
+                const Text(
+                  'Complete our registration form and get started with MedLab System',
+                  style: TextStyle(fontSize: 16, color: Colors.white70),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    context.push('/register-owner');
                   },
-                ),
-                delay: 200.ms,
-              ),
-              const SizedBox(height: 20),
-              AppAnimations.slideInFromRight(
-                TextFormField(
-                  controller: _emailController,
-                  decoration: const InputDecoration(
-                    labelText: 'Email Address *',
-                    prefixIcon: Icon(Icons.email),
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your email';
-                    }
-                    if (!value.contains('@')) {
-                      return 'Please enter a valid email';
-                    }
-                    return null;
-                  },
-                ),
-                delay: 400.ms,
-              ),
-              const SizedBox(height: 20),
-              AppAnimations.slideInFromLeft(
-                TextFormField(
-                  controller: _labNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Laboratory Name *',
-                    prefixIcon: Icon(Icons.business),
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your laboratory name';
-                    }
-                    return null;
-                  },
-                ),
-                delay: 600.ms,
-              ),
-              const SizedBox(height: 20),
-              AppAnimations.slideInFromRight(
-                TextFormField(
-                  controller: _messageController,
-                  decoration: const InputDecoration(
-                    labelText: 'Tell us about your needs *',
-                    prefixIcon: Icon(Icons.message),
-                    border: OutlineInputBorder(),
-                    alignLabelWithHint: true,
-                  ),
-                  maxLines: 5,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please tell us about your needs';
-                    }
-                    return null;
-                  },
-                ),
-                delay: 800.ms,
-              ),
-              const SizedBox(height: 32),
-              AppAnimations.scaleIn(
-                SizedBox(
-                  width: double.infinity,
-                  child: AnimatedButton(
-                    child: ElevatedButton(
-                      onPressed: _isSubmitting ? null : _submitForm,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      child: _isSubmitting
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text(
-                              'Get Started',
-                              style: TextStyle(fontSize: 16),
-                            ),
+                  icon: const Icon(Icons.app_registration),
+                  label: const Text('Register Now'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Theme.of(context).colorScheme.primary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 16,
+                    ),
+                    textStyle: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
-                delay: 1000.ms,
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
+        const SizedBox(height: 40),
+
+        // Contact Form
+        AnimatedCard(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AppAnimations.fadeIn(
+                    Text(
+                      'Or Contact Us for More Information',
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  AppAnimations.slideInFromLeft(
+                    TextFormField(
+                      controller: _nameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Full Name *',
+                        prefixIcon: Icon(Icons.person),
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your name';
+                        }
+                        return null;
+                      },
+                    ),
+                    delay: 200.ms,
+                  ),
+                  const SizedBox(height: 20),
+                  AppAnimations.slideInFromRight(
+                    TextFormField(
+                      controller: _emailController,
+                      decoration: const InputDecoration(
+                        labelText: 'Email Address *',
+                        prefixIcon: Icon(Icons.email),
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your email';
+                        }
+                        if (!value.contains('@')) {
+                          return 'Please enter a valid email';
+                        }
+                        return null;
+                      },
+                    ),
+                    delay: 400.ms,
+                  ),
+                  const SizedBox(height: 20),
+                  AppAnimations.slideInFromLeft(
+                    TextFormField(
+                      controller: _labNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Laboratory Name *',
+                        prefixIcon: Icon(Icons.business),
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your laboratory name';
+                        }
+                        return null;
+                      },
+                    ),
+                    delay: 600.ms,
+                  ),
+                  const SizedBox(height: 20),
+                  AppAnimations.slideInFromRight(
+                    TextFormField(
+                      controller: _messageController,
+                      decoration: const InputDecoration(
+                        labelText: 'Tell us about your needs *',
+                        prefixIcon: Icon(Icons.message),
+                        border: OutlineInputBorder(),
+                        alignLabelWithHint: true,
+                      ),
+                      maxLines: 5,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please tell us about your needs';
+                        }
+                        return null;
+                      },
+                    ),
+                    delay: 800.ms,
+                  ),
+                  const SizedBox(height: 32),
+                  AppAnimations.scaleIn(
+                    SizedBox(
+                      width: double.infinity,
+                      child: AnimatedButton(
+                        child: ElevatedButton(
+                          onPressed: _isSubmitting ? null : _submitForm,
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                          child: _isSubmitting
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text(
+                                  'Send Message',
+                                  style: TextStyle(fontSize: 16),
+                                ),
+                        ),
+                      ),
+                    ),
+                    delay: 1000.ms,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

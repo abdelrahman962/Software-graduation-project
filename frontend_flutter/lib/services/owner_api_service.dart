@@ -31,6 +31,30 @@ class OwnerApiService {
     return await ApiService.get('/owner/dashboard');
   }
 
+  // Profile
+  static Future<Map<String, dynamic>> getProfile() async {
+    await ensureTokenInitialized();
+    return await ApiService.get('/owner/profile');
+  }
+
+  static Future<Map<String, dynamic>> updateProfile(
+    Map<String, dynamic> profileData,
+  ) async {
+    await ensureTokenInitialized();
+    return await ApiService.put('/owner/profile', profileData);
+  }
+
+  static Future<Map<String, dynamic>> changePassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
+    await ensureTokenInitialized();
+    return await ApiService.put('/owner/change-password', {
+      'currentPassword': currentPassword,
+      'newPassword': newPassword,
+    });
+  }
+
   // Staff Management
   static Future<Map<String, dynamic>> getStaff() async {
     await ensureTokenInitialized();
@@ -107,6 +131,45 @@ class OwnerApiService {
   static Future<Map<String, dynamic>> deleteTest(String testId) async {
     await ensureTokenInitialized();
     return await ApiService.delete('/owner/tests/$testId');
+  }
+
+  // Test Component Management
+  static Future<Map<String, dynamic>> getTestComponents(String testId) async {
+    await ensureTokenInitialized();
+    return await ApiService.get('/owner/tests/$testId/components');
+  }
+
+  static Future<Map<String, dynamic>> addTestComponent(
+    String testId,
+    Map<String, dynamic> componentData,
+  ) async {
+    await ensureTokenInitialized();
+    return await ApiService.post(
+      '/owner/tests/$testId/components',
+      componentData,
+    );
+  }
+
+  static Future<Map<String, dynamic>> updateTestComponent(
+    String testId,
+    String componentId,
+    Map<String, dynamic> componentData,
+  ) async {
+    await ensureTokenInitialized();
+    return await ApiService.put(
+      '/owner/tests/$testId/components/$componentId',
+      componentData,
+    );
+  }
+
+  static Future<Map<String, dynamic>> deleteTestComponent(
+    String testId,
+    String componentId,
+  ) async {
+    await ensureTokenInitialized();
+    return await ApiService.delete(
+      '/owner/tests/$testId/components/$componentId',
+    );
   }
 
   // Device Management
@@ -287,5 +350,52 @@ class OwnerApiService {
   static Future<Map<String, dynamic>> getAllConversations() async {
     await ensureTokenInitialized();
     return await ApiService.get(ApiConfig.ownerConversations);
+  }
+
+  // Results & Invoices
+  static Future<Map<String, dynamic>> getAllResults({
+    int page = 1,
+    int limit = 50,
+    String? startDate,
+    String? endDate,
+    String? status,
+    String? patientName,
+    String? testName,
+  }) async {
+    await ensureTokenInitialized();
+
+    final queryParams = <String, String>{};
+    queryParams['page'] = page.toString();
+    queryParams['limit'] = limit.toString();
+
+    if (startDate != null) queryParams['startDate'] = startDate;
+    if (endDate != null) queryParams['endDate'] = endDate;
+    if (status != null) queryParams['status'] = status;
+    if (patientName != null) queryParams['patientName'] = patientName;
+    if (testName != null) queryParams['testName'] = testName;
+
+    return await ApiService.get('/owner/results', params: queryParams);
+  }
+
+  static Future<Map<String, dynamic>> getAllInvoices({
+    int page = 1,
+    int limit = 50,
+    String? startDate,
+    String? endDate,
+    String? status,
+    String? patientName,
+  }) async {
+    await ensureTokenInitialized();
+
+    final queryParams = <String, String>{};
+    queryParams['page'] = page.toString();
+    queryParams['limit'] = limit.toString();
+
+    if (startDate != null) queryParams['startDate'] = startDate;
+    if (endDate != null) queryParams['endDate'] = endDate;
+    if (status != null) queryParams['status'] = status;
+    if (patientName != null) queryParams['patientName'] = patientName;
+
+    return await ApiService.get('/owner/invoices', params: queryParams);
   }
 }

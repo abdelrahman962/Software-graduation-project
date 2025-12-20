@@ -68,6 +68,27 @@ class MyApp extends StatelessWidget {
           ).copyWith(viewInsets: EdgeInsets.zero, viewPadding: EdgeInsets.zero),
           child: MaterialApp.router(
             title: 'Medical Lab Management System',
+            onGenerateTitle: (context) {
+              // Get current route location
+              final currentRoute =
+                  AppRouter.router.routerDelegate.currentConfiguration.uri.path;
+
+              // Update browser title based on route
+              if (currentRoute.startsWith('/owner')) {
+                return 'Owner Dashboard - MedLab System';
+              } else if (currentRoute.startsWith('/staff')) {
+                return 'Staff Dashboard - MedLab System';
+              } else if (currentRoute.startsWith('/patient')) {
+                return 'Patient Portal - MedLab System';
+              } else if (currentRoute.startsWith('/doctor')) {
+                return 'Doctor Portal - MedLab System';
+              } else if (currentRoute.startsWith('/admin')) {
+                return 'Admin Dashboard - MedLab System';
+              } else if (currentRoute == '/' || currentRoute == '/marketing') {
+                return 'MedLab System - Professional Lab Management';
+              }
+              return 'Medical Lab Management System';
+            },
             debugShowCheckedModeBanner: false,
             theme: AppTheme.lightTheme,
             routerConfig: AppRouter.router,

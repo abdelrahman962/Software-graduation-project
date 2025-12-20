@@ -14,7 +14,10 @@ const doctorSchema = new mongoose.Schema({
   phone_number: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   username: { type: String, required: true, unique: true },
-  password: { type: String, required: true }
+  password: { type: String, required: true },
+  specialty: { type: String },
+  license_number: { type: String },
+  years_of_experience: { type: Number }
 });
 
 // Check username uniqueness across all user collections
@@ -23,7 +26,7 @@ doctorSchema.pre('save', async function(next) {
     const existingUsers = await Promise.all([
       mongoose.model('Patient').findOne({ username: this.username }),
       mongoose.model('Staff').findOne({ username: this.username }),
-      mongoose.model('Owner').findOne({ username: this.username }),
+      mongoose.model('LabOwner').findOne({ username: this.username }),
       mongoose.model('Admin').findOne({ username: this.username }),
       mongoose.model('Doctor').findOne({ username: this.username, _id: { $ne: this._id } })
     ]);

@@ -1,5 +1,6 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
@@ -8,12 +9,13 @@ import '../../services/staff_api_service.dart';
 import '../../services/api_service.dart';
 import '../../config/theme.dart';
 import '../../widgets/animations.dart';
-import '../../widgets/barcode_display_widget.dart';
 import '../../utils/responsive_utils.dart';
 import '../../widgets/paginated_list.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'staff_sidebar.dart';
 import '../../widgets/system_feedback_form.dart';
+import '../../widgets/new_order_form.dart';
+import 'staff_profile_screen.dart';
 
 class StaffDashboardScreen extends StatefulWidget {
   const StaffDashboardScreen({super.key});
@@ -26,18 +28,34 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     with TickerProviderStateMixin {
   Map<String, dynamic>? _assignedTests;
   Map<String, dynamic>? _pendingOrders;
+  Map<String, dynamic>? _allResultsForUpload;
+  Map<String, dynamic>? _allLabTests;
   List<Map<String, dynamic>>? _dropdownInventoryItems;
   bool _isTestsLoading = false;
   bool _isOrdersLoading = false;
+  bool _isResultsForUploadLoading = false;
+  bool _isLabTestsLoading = false;
+
+  // Orders data
+  Map<String, dynamic>? _allOrders;
+  bool _isAllOrdersLoading = false;
   String? _selectedStatus;
   String? _selectedDeviceId;
   late TabController _tabController;
+  String _inventorySearchQuery = '';
 
   // Sidebar state
   int _selectedIndex = 0;
   bool _isSidebarOpen = true;
   bool _hasFeedbackSubmitted = false;
   bool _showFeedbackReminder = true;
+
+  // Current staff info
+  String? _currentStaffId;
+
+  // Controllers for result upload
+  final TextEditingController _resultController = TextEditingController();
+  final TextEditingController _remarksController = TextEditingController();
 
   @override
   void initState() {
@@ -77,6 +95,10 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
 
   // Load only the first tab's data initially
   Future<void> _loadInitialData() async {
+    // Get current staff ID from auth provider
+    final authProvider = Provider.of<StaffAuthProvider>(context, listen: false);
+    _currentStaffId = authProvider.user?.id;
+
     await _loadAssignedTests();
   }
 
@@ -142,6 +164,105 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     }
   }
 
+  Future<void> _loadOrdersInBackground() async {
+    if (_isAllOrdersLoading) return;
+    setState(() => _isAllOrdersLoading = true);
+
+    try {
+      final response = await StaffApiService.getAllLabOrders();
+      if (mounted) {
+        setState(() {
+          _allOrders = response;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to load orders: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isAllOrdersLoading = false);
+      }
+    }
+  }
+
+  Future<void> _loadResultsForUpload() async {
+    if (_isResultsForUploadLoading) return;
+    setState(() => _isResultsForUploadLoading = true);
+
+    try {
+      final response = await StaffApiService.getAllResults(
+        status: 'pending', // Only get results that don't have data yet
+        limit: 100, // Get more results
+      );
+      if (mounted) {
+        setState(() {
+          _allResultsForUpload = response;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load results for upload: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isResultsForUploadLoading = false);
+      }
+    }
+  }
+
+  Future<void> _loadAllLabTests() async {
+    if (_isLabTestsLoading) return;
+    setState(() => _isLabTestsLoading = true);
+
+    try {
+      final response = await StaffApiService.getLabTests();
+      if (mounted) {
+        setState(() {
+          _allLabTests = response;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to load lab tests: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLabTestsLoading = false);
+      }
+    }
+  }
+
+  Future<void> _loadAllOrders() async {
+    if (_isAllOrdersLoading) return;
+    setState(() => _isAllOrdersLoading = true);
+
+    try {
+      final response = await StaffApiService.getAllLabOrders();
+      if (mounted) {
+        setState(() {
+          _allOrders = response;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to load orders: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isAllOrdersLoading = false);
+      }
+    }
+  }
+
   Future<void> _loadDropdownInventoryItems() async {
     try {
       final response = await StaffApiService.getInventoryItems(
@@ -170,8 +291,22 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
         page: page,
         limit: limit,
       );
+
+      // Filter results based on search query
+      List<dynamic> allItems = response['data'] ?? [];
+      List<dynamic> filteredItems = allItems;
+
+      if (_inventorySearchQuery.isNotEmpty) {
+        filteredItems = allItems.where((item) {
+          final name = (item['name'] as String? ?? '').toLowerCase();
+          final itemCode = (item['item_code'] as String? ?? '').toLowerCase();
+          final query = _inventorySearchQuery.toLowerCase();
+          return name.contains(query) || itemCode.contains(query);
+        }).toList();
+      }
+
       return {
-        'data': response['data'] ?? [],
+        'data': filteredItems,
         'hasMore': response['pagination']?['hasMore'] ?? false,
       };
     } catch (e) {
@@ -552,31 +687,37 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
   }
 
   Future<void> _collectSample(String detailId) async {
-    if (detailId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Invalid test ID'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
+    try {
+      final response = await StaffApiService.collectSample(detailId: detailId);
 
-    final response = await StaffApiService.collectSample(detailId: detailId);
-
-    if (mounted) {
-      if (response['success'] != false) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Sample collected successfully'),
-            backgroundColor: AppTheme.successGreen,
-          ),
-        );
-        _loadAssignedTests();
+      if (response['success'] == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                response['message'] ?? 'Sample collected successfully',
+              ),
+              backgroundColor: AppTheme.successGreen,
+            ),
+          );
+          // Refresh orders to show updated status
+          _loadOrdersInBackground();
+        }
       } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response['message'] ?? 'Failed to collect sample'),
+              backgroundColor: AppTheme.errorRed,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(response['message'] ?? 'Failed to collect sample'),
+            content: Text('Error collecting sample: $e'),
             backgroundColor: AppTheme.errorRed,
           ),
         );
@@ -585,89 +726,447 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
   }
 
   Future<void> _showUploadResultDialog(Map<String, dynamic> test) async {
+    // First, check if this test has components
+    bool isLoadingComponents = true;
+    List<Map<String, dynamic>> components = [];
+    bool hasComponents = false;
+
+    // Controllers for components
+    final Map<String, TextEditingController> componentControllers = {};
+    final Map<String, TextEditingController> componentRemarksControllers = {};
+
+    // Controllers for single-value test
     final resultController = TextEditingController();
     final remarksController = TextEditingController();
 
+    // Get test_id from the test data
+    final testId =
+        test['test_id']?['_id']?.toString() ??
+        test['test_id']?.toString() ??
+        '';
+
     await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Upload Result - ${test['test_name'] as String? ?? 'Unknown Test'}',
-        ),
-        content: SingleChildScrollView(
-          child: SizedBox(
-            width: MediaQuery.of(context).size.width * 0.8,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          // Load components on first build
+          if (isLoadingComponents && testId.isNotEmpty) {
+            StaffApiService.getTestComponents(testId)
+                .then((response) {
+                  if (response['has_components'] == true &&
+                      response['components'] != null) {
+                    setDialogState(() {
+                      components = List<Map<String, dynamic>>.from(
+                        response['components'],
+                      );
+                      hasComponents = components.isNotEmpty;
+                      isLoadingComponents = false;
+
+                      // Create controllers for each component
+                      for (var comp in components) {
+                        final compId = comp['_id'].toString();
+                        componentControllers[compId] = TextEditingController();
+                        componentRemarksControllers[compId] =
+                            TextEditingController();
+                      }
+                    });
+                  } else {
+                    setDialogState(() {
+                      hasComponents = false;
+                      isLoadingComponents = false;
+                    });
+                  }
+                })
+                .catchError((e) {
+                  setDialogState(() {
+                    hasComponents = false;
+                    isLoadingComponents = false;
+                  });
+                });
+          }
+
+          return AlertDialog(
+            title: Row(
               children: [
-                TextField(
-                  controller: resultController,
-                  decoration: const InputDecoration(
-                    labelText: 'Result Value',
-                    hintText: 'Enter test result',
+                const Icon(Icons.upload_file, color: Colors.blue),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Upload Result',
+                        style: TextStyle(fontSize: 18),
+                      ),
+                      Text(
+                        test['test_name'] as String? ?? 'Unknown Test',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.normal,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: remarksController,
-                  decoration: const InputDecoration(
-                    labelText: 'Remarks (Optional)',
-                    hintText: 'Any additional notes',
-                  ),
-                  maxLines: 3,
                 ),
               ],
             ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (resultController.text.isNotEmpty) {
-                Navigator.pop(context, true);
+            content: SingleChildScrollView(
+              child: SizedBox(
+                width: MediaQuery.of(context).size.width * 0.8,
+                child: isLoadingComponents
+                    ? const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 16),
+                          Text('Checking test configuration...'),
+                        ],
+                      )
+                    : hasComponents
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blue[50],
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue[200]!),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.info_outline,
+                                  color: Colors.blue[700],
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'This test has ${components.length} components. Enter values for each:',
+                                    style: TextStyle(
+                                      color: Colors.blue[900],
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          ...components.asMap().entries.map((entry) {
+                            final index = entry.key;
+                            final comp = entry.value;
+                            final compId = comp['_id'].toString();
 
-                final response = await StaffApiService.uploadResult(
-                  detailId: test['_id']?.toString() ?? '',
-                  resultValue: resultController.text,
-                  remarks: remarksController.text.isEmpty
-                      ? null
-                      : remarksController.text,
-                );
-
-                if (context.mounted) {
-                  if (response['success'] != false) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Result uploaded successfully'),
-                        backgroundColor: AppTheme.successGreen,
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              elevation: 2,
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        CircleAvatar(
+                                          radius: 12,
+                                          backgroundColor: Colors.blue[100],
+                                          child: Text(
+                                            '${index + 1}',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.blue[900],
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            comp['component_name'] ?? '',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        if (comp['component_code'] != null)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.grey[200],
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
+                                            ),
+                                            child: Text(
+                                              comp['component_code'],
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                        const SizedBox(width: 8),
+                                        if (comp['units'] != null)
+                                          Text(
+                                            'Units: ${comp['units']}',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey[600],
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                    if (comp['reference_range'] != null) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Normal Range: ${comp['reference_range']}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.green[700],
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                    const SizedBox(height: 12),
+                                    TextField(
+                                      controller: componentControllers[compId],
+                                      decoration: const InputDecoration(
+                                        labelText: 'Value *',
+                                        hintText: 'Enter measured value',
+                                        border: OutlineInputBorder(),
+                                        isDense: true,
+                                      ),
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    TextField(
+                                      controller:
+                                          componentRemarksControllers[compId],
+                                      decoration: const InputDecoration(
+                                        labelText: 'Remarks (Optional)',
+                                        hintText: 'Notes for this component',
+                                        border: OutlineInputBorder(),
+                                        isDense: true,
+                                      ),
+                                      maxLines: 2,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }),
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: remarksController,
+                            decoration: const InputDecoration(
+                              labelText: 'Overall Remarks (Optional)',
+                              hintText: 'General notes about the result',
+                              border: OutlineInputBorder(),
+                            ),
+                            maxLines: 2,
+                          ),
+                        ],
+                      )
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextField(
+                            controller: resultController,
+                            decoration: const InputDecoration(
+                              labelText: 'Result Value',
+                              hintText: 'Enter test result',
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: remarksController,
+                            decoration: const InputDecoration(
+                              labelText: 'Remarks (Optional)',
+                              hintText: 'Any additional notes',
+                            ),
+                            maxLines: 3,
+                          ),
+                        ],
                       ),
-                    );
-                    _loadAssignedTests();
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          response['message'] ?? 'Failed to upload result',
-                        ),
-                        backgroundColor: AppTheme.errorRed,
-                      ),
-                    );
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  // Dispose controllers
+                  for (var controller in componentControllers.values) {
+                    controller.dispose();
                   }
-                }
-              }
-            },
-            child: const Text('Upload'),
-          ),
-        ],
+                  for (var controller in componentRemarksControllers.values) {
+                    controller.dispose();
+                  }
+                  resultController.dispose();
+                  remarksController.dispose();
+                  Navigator.pop(dialogContext, false);
+                },
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: isLoadingComponents
+                    ? null
+                    : () async {
+                        // Validation
+                        if (hasComponents) {
+                          // Check if all component values are filled
+                          bool allFilled = componentControllers.values.every(
+                            (controller) => controller.text.isNotEmpty,
+                          );
+                          if (!allFilled) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Please enter values for all components',
+                                ),
+                                backgroundColor: AppTheme.errorRed,
+                              ),
+                            );
+                            return;
+                          }
+                        } else {
+                          // Single-value test
+                          if (resultController.text.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please enter a result value'),
+                                backgroundColor: AppTheme.errorRed,
+                              ),
+                            );
+                            return;
+                          }
+                        }
+
+                        // Dispose controllers
+                        for (var controller in componentControllers.values) {
+                          controller.dispose();
+                        }
+                        for (var controller
+                            in componentRemarksControllers.values) {
+                          controller.dispose();
+                        }
+                        resultController.dispose();
+                        remarksController.dispose();
+
+                        Navigator.pop(dialogContext, true);
+
+                        // Prepare data for submission
+
+                        if (hasComponents) {
+                          // Multi-component test
+                          final componentValues = components.map((comp) {
+                            final compId = comp['_id'].toString();
+                            return {
+                              'component_id': compId,
+                              'component_value':
+                                  componentControllers[compId]!.text,
+                              if (componentRemarksControllers[compId]!
+                                  .text
+                                  .isNotEmpty)
+                                'remarks':
+                                    componentRemarksControllers[compId]!.text,
+                            };
+                          }).toList();
+
+                          final response = await StaffApiService.uploadResult(
+                            detailId: test['_id']?.toString() ?? '',
+                            components: componentValues,
+                            remarks: remarksController.text.isEmpty
+                                ? null
+                                : remarksController.text,
+                          );
+
+                          if (context.mounted) {
+                            if (response['success'] != false) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    response['urgent'] == true
+                                        ? '⚠️ Result uploaded - Marked as URGENT'
+                                        : 'Result uploaded successfully',
+                                  ),
+                                  backgroundColor: response['urgent'] == true
+                                      ? Colors.orange
+                                      : AppTheme.successGreen,
+                                ),
+                              );
+                              _loadAssignedTests();
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    response['message'] ??
+                                        'Failed to upload result',
+                                  ),
+                                  backgroundColor: AppTheme.errorRed,
+                                ),
+                              );
+                            }
+                          }
+                        } else {
+                          // Single-value test
+                          final response = await StaffApiService.uploadResult(
+                            detailId: test['_id']?.toString() ?? '',
+                            resultValue: resultController.text,
+                            remarks: remarksController.text.isEmpty
+                                ? null
+                                : remarksController.text,
+                          );
+
+                          if (context.mounted) {
+                            if (response['success'] != false) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    response['urgent'] == true
+                                        ? '⚠️ Result uploaded - Marked as URGENT'
+                                        : 'Result uploaded successfully',
+                                  ),
+                                  backgroundColor: response['urgent'] == true
+                                      ? Colors.orange
+                                      : AppTheme.successGreen,
+                                ),
+                              );
+                              _loadAssignedTests();
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    response['message'] ??
+                                        'Failed to upload result',
+                                  ),
+                                  backgroundColor: AppTheme.errorRed,
+                                ),
+                              );
+                            }
+                          }
+                        }
+                      },
+                child: const Text('Upload'),
+              ),
+            ],
+          );
+        },
       ),
     );
-
-    resultController.dispose();
-    remarksController.dispose();
   }
 
   @override
@@ -917,13 +1416,54 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
               child: ListView(
                 padding: EdgeInsets.zero,
                 children: [
+                  // WORKSTATION Section
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+                    child: Text(
+                      'WORKSTATION',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.textLight,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
                   _buildDrawerItem('Dashboard', Icons.dashboard, 0),
-                  _buildDrawerItem('My Tests', Icons.assignment, 1),
-                  _buildDrawerItem('Sample Collection', Icons.science, 2),
-                  _buildDrawerItem('Result Upload', Icons.upload_file, 3),
-                  _buildDrawerItem('Barcode Generation', Icons.qr_code, 4),
-                  _buildDrawerItem('Inventory', Icons.inventory, 5),
-                  _buildDrawerItem('Notifications', Icons.notifications, 6),
+                  _buildDrawerItem('New Order', Icons.add_box, 1),
+                  _buildDrawerItem('Orders', Icons.assignment, 2),
+                  _buildDrawerItem('My Tests', Icons.assignment, 3),
+                  _buildDrawerItem('Sample Collection', Icons.science, 4),
+                  _buildDrawerItem('Result Upload', Icons.upload_file, 5),
+
+                  // OPERATIONS Section
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+                    child: Text(
+                      'OPERATIONS',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.textLight,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                  _buildDrawerItem('Inventory', Icons.inventory, 6),
+                  _buildDrawerItem('Notifications', Icons.notifications, 7),
+
+                  // ACCOUNT Section
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+                    child: Text(
+                      'ACCOUNT',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.textLight,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                  _buildDrawerItem('My Profile', Icons.person, 8),
+                  _buildDrawerItem('Logout', Icons.logout, -1, isLogout: true),
                 ],
               ),
             ),
@@ -933,8 +1473,14 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     );
   }
 
-  Widget _buildDrawerItem(String title, IconData icon, int index) {
+  Widget _buildDrawerItem(
+    String title,
+    IconData icon,
+    int index, {
+    bool isLogout = false,
+  }) {
     final isSelected = _selectedIndex == index;
+
     return AnimatedCard(
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -958,9 +1504,20 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
           ),
           selected: isSelected,
           selectedTileColor: AppTheme.primaryBlue.withValues(alpha: 0.1),
-          onTap: () {
-            setState(() => _selectedIndex = index);
-            Navigator.pop(context); // Close drawer
+          onTap: () async {
+            if (isLogout) {
+              final authProvider = Provider.of<StaffAuthProvider>(
+                context,
+                listen: false,
+              );
+              await authProvider.logout();
+              if (context.mounted) {
+                context.go('/');
+              }
+            } else {
+              setState(() => _selectedIndex = index);
+              Navigator.pop(context); // Close drawer
+            }
           },
         ),
       ),
@@ -972,20 +1529,28 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
       case 0:
         return _buildDashboardView();
       case 1:
-        return _buildMyTestsView();
+        return _buildNewOrderView();
       case 2:
-        return _buildSampleCollectionView();
+        return _buildOrdersView();
       case 3:
-        return _buildResultUploadView();
+        return _buildMyTestsView();
       case 4:
-        return _buildBarcodeGenerationView();
+        return _buildSampleCollectionView();
       case 5:
-        return _buildInventoryView();
+        return _buildResultUploadView();
       case 6:
+        return _buildInventoryView();
+      case 7:
         return _buildNotificationsView();
+      case 8:
+        return const StaffProfileScreen();
       default:
         return _buildDashboardView();
     }
+  }
+
+  Widget _buildNotificationsView() {
+    return const Center(child: Text('Notifications view coming soon'));
   }
 
   Widget _buildDashboardView() {
@@ -1104,8 +1669,1062 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     );
   }
 
+  Widget _buildNewOrderView() {
+    return AppAnimations.pageDepthTransition(
+      SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Create New Order',
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: AppTheme.textDark,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Register walk-in patient and create order',
+              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 24),
+            NewOrderForm(),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildMyTestsView() {
-    return _buildDashboardView(); // For now, same as dashboard
+    // Load all lab tests if not already loaded
+    if (_allLabTests == null && !_isLabTestsLoading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadAllLabTests();
+      });
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadAllLabTests,
+      child: AppAnimations.pageDepthTransition(
+        SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AppAnimations.blurFadeIn(
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.science,
+                      color: AppTheme.primaryBlue,
+                      size: 32,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'All Lab Tests',
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                delay: 100.ms,
+              ),
+              const SizedBox(height: 16),
+              AppAnimations.fadeIn(
+                Text(
+                  'View all tests in your lab and assign yourself to unassigned tests',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyLarge?.copyWith(color: Colors.grey.shade600),
+                ),
+                delay: 200.ms,
+              ),
+              const SizedBox(height: 24),
+
+              // Tests List
+              AppAnimations.fadeIn(_buildAllLabTestsList(), delay: 300.ms),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOrdersView() {
+    final orders = _allOrders?['orders'] as List<dynamic>? ?? [];
+    final isLoading = _isAllOrdersLoading;
+
+    return Scaffold(
+      backgroundColor: AppTheme.backgroundColor,
+      body: Column(
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: Colors.white,
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.assignment,
+                  color: AppTheme.primaryBlue,
+                  size: 28,
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Lab Orders',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primaryBlue,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  onPressed: _loadAllOrders,
+                  tooltip: 'Refresh Orders',
+                ),
+              ],
+            ),
+          ),
+
+          // Orders List
+          Expanded(
+            child: isLoading
+                ? const Center(
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        AppTheme.primaryBlue,
+                      ),
+                    ),
+                  )
+                : orders.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.assignment_outlined,
+                          size: 64,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No orders found',
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: orders.length,
+                    itemBuilder: (context, index) {
+                      final order = orders[index];
+                      return _buildOrderCardWithInvoice(order)
+                          .animate()
+                          .fadeIn(duration: 300.ms, delay: (index * 50).ms)
+                          .slideY(begin: 0.1, end: 0, duration: 300.ms);
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOrderCardWithInvoice(dynamic order) {
+    final orderDate = DateTime.parse(order['order_date']);
+    final status = order['status'] ?? 'unknown';
+    final testCount = order['test_count'] ?? 0;
+    final labName = order['owner_id']?['lab_name'] ?? 'Medical Lab';
+
+    Color statusColor;
+    IconData statusIcon;
+
+    switch (status) {
+      case 'completed':
+        statusColor = AppTheme.successGreen;
+        statusIcon = Icons.check_circle;
+        break;
+      case 'processing':
+        statusColor = AppTheme.warningYellow;
+        statusIcon = Icons.hourglass_top;
+        break;
+      case 'pending':
+        statusColor = AppTheme.primaryBlue;
+        statusIcon = Icons.schedule;
+        break;
+      default:
+        statusColor = Colors.grey;
+        statusIcon = Icons.help;
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with date and lab name
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(statusIcon, color: statusColor, size: 24),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        DateFormat('MMM dd, yyyy').format(orderDate),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                      Text(
+                        labName,
+                        style: const TextStyle(
+                          color: AppTheme.textMedium,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    status.toUpperCase(),
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Order info
+            Row(
+              children: [
+                Expanded(
+                  child: _buildInfoItem(
+                    Icons.science,
+                    '$testCount Test${testCount != 1 ? 's' : ''}',
+                    'Medical tests ordered',
+                  ),
+                ),
+                if (order['total_cost'] != null)
+                  Expanded(
+                    child: _buildInfoItem(
+                      Icons.attach_money,
+                      'ILS ${order['total_cost'].toStringAsFixed(2)}',
+                      'Total cost',
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Patient & Doctor Info
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.person, size: 14, color: Colors.blue[700]),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Patient',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        order['patient_name'] ?? 'N/A',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.medical_services,
+                            size: 14,
+                            color: Colors.green[700],
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Doctor',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        order['doctor_name'] ?? 'Not Assigned',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: order['doctor_name'] != null
+                              ? AppTheme.textDark
+                              : Colors.grey[500],
+                          fontStyle: order['doctor_name'] != null
+                              ? FontStyle.normal
+                              : FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (order['order_details'] != null &&
+                order['order_details'].isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'Tests & Assigned Staff:',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ..._buildTestListWithStaff(order['order_details']),
+            ],
+            const SizedBox(height: 20),
+            // Action buttons
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _showOrderDetailsWithInvoice(order),
+                    icon: const Icon(Icons.science, size: 18),
+                    label: const Text('View Details'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryBlue,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showInvoiceDetails(order),
+                    icon: const Icon(Icons.receipt_long, size: 18),
+                    label: const Text('View Invoice'),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppTheme.primaryBlue),
+                      foregroundColor: AppTheme.primaryBlue,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              '$label:',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: AppTheme.textDark,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(color: AppTheme.textDark),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _assignTestToMe(String detailId) async {
+    try {
+      final response = await StaffApiService.assignTestToMe(detailId);
+
+      if (response['success'] == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                response['message'] ?? 'Test assigned successfully',
+              ),
+              backgroundColor: AppTheme.successGreen,
+            ),
+          );
+          // Refresh orders to show updated assignment
+          _loadOrdersInBackground();
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response['message'] ?? 'Failed to assign test'),
+              backgroundColor: AppTheme.errorRed,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error assigning test: $e'),
+            backgroundColor: AppTheme.errorRed,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _uploadResult(String detailId) async {
+    // Show dialog for result input
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Upload Test Result'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _resultController,
+              decoration: const InputDecoration(
+                labelText: 'Result Value',
+                hintText: 'Enter test result',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 3,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _remarksController,
+              decoration: const InputDecoration(
+                labelText: 'Remarks (Optional)',
+                hintText: 'Additional notes',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(_resultController.text),
+            child: const Text('Upload'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      try {
+        final response = await StaffApiService.uploadResult(
+          detailId: detailId,
+          resultValue: result,
+          remarks: _remarksController.text.isNotEmpty
+              ? _remarksController.text
+              : null,
+        );
+
+        if (response['success'] == true) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  response['message'] ?? 'Result uploaded successfully',
+                ),
+                backgroundColor: AppTheme.successGreen,
+              ),
+            );
+            // Clear controllers
+            _resultController.clear();
+            _remarksController.clear();
+            // Refresh orders to show updated status
+            _loadOrdersInBackground();
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(response['message'] ?? 'Failed to upload result'),
+                backgroundColor: AppTheme.errorRed,
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error uploading result: $e'),
+              backgroundColor: AppTheme.errorRed,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Widget _buildInfoItem(IconData icon, String value, String label) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: AppTheme.primaryBlue),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textMedium,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildTestListWithStaff(List<dynamic> orderDetails) {
+    return orderDetails.take(5).map((detail) {
+      final testName = detail['test_name'] ?? 'Unknown Test';
+      final assignedStaff = detail['staff_id'];
+      final staffName = assignedStaff != null
+          ? '${assignedStaff['full_name']?['first'] ?? ''} ${assignedStaff['full_name']?['last'] ?? ''}'
+                .trim()
+          : 'Unassigned';
+      final detailId = detail['_id'];
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey[200]!),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.science, size: 16, color: AppTheme.primaryBlue),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                testName,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppTheme.textDark,
+                ),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: assignedStaff != null
+                    ? AppTheme.successGreen.withValues(alpha: 0.1)
+                    : AppTheme.warningYellow.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                assignedStaff != null ? 'Assigned' : 'Unassigned',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: assignedStaff != null
+                      ? AppTheme.successGreen
+                      : AppTheme.warningYellow,
+                ),
+              ),
+            ),
+            if (assignedStaff != null) ...[
+              const SizedBox(width: 8),
+              Icon(Icons.person, size: 14, color: AppTheme.primaryBlue),
+              const SizedBox(width: 4),
+              Text(
+                staffName,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: AppTheme.primaryBlue,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ] else ...[
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: () => _assignTestToMe(detailId),
+                icon: const Icon(Icons.person_add, size: 14),
+                label: const Text('Assign to Me'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryBlue,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  textStyle: const TextStyle(fontSize: 10),
+                  minimumSize: const Size(0, 28),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }).toList();
+  }
+
+  void _showOrderDetailsWithInvoice(dynamic order) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          'Order #${order['_id']?.toString().substring(0, 8) ?? 'N/A'}',
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildDetailRow('Patient', order['patient_name'] ?? 'N/A'),
+              _buildDetailRow('Doctor', order['doctor_name'] ?? 'Not Assigned'),
+              _buildDetailRow(
+                'Status',
+                (order['status'] ?? 'pending').toString().toUpperCase(),
+              ),
+              _buildDetailRow(
+                'Order Date',
+                order['order_date'] != null
+                    ? DateTime.parse(
+                        order['order_date'],
+                      ).toString().split(' ')[0]
+                    : 'N/A',
+              ),
+              _buildDetailRow('Test Count', '${order['test_count'] ?? 0}'),
+              if (order['total_cost'] != null)
+                _buildDetailRow(
+                  'Total Cost',
+                  'ILS ${order['total_cost'].toStringAsFixed(2)}',
+                ),
+              if (order['barcode'] != null)
+                _buildDetailRow('Barcode', order['barcode'].toString()),
+              const SizedBox(height: 16),
+              const Text(
+                'Test Details:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              ..._buildDetailedTestList(order['order_details'] ?? []),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showInvoiceDetails(dynamic order) {
+    // For now, show a placeholder. In a real implementation, this would
+    // navigate to or show invoice details
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Invoice Details'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Order ID: ${order['_id']?.toString().substring(0, 8) ?? 'N/A'}',
+            ),
+            const SizedBox(height: 8),
+            Text('Patient: ${order['patient_name'] ?? 'N/A'}'),
+            const SizedBox(height: 8),
+            Text(
+              'Total Amount: ILS ${order['total_cost']?.toStringAsFixed(2) ?? 'N/A'}',
+            ),
+            const SizedBox(height: 8),
+            Text('Status: ${order['status'] ?? 'Unknown'}'),
+            const SizedBox(height: 16),
+            const Text(
+              'Invoice functionality coming soon...',
+              style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildDetailedTestList(List<dynamic> orderDetails) {
+    return orderDetails.map((detail) {
+      final testName = detail['test_name'] ?? 'Unknown Test';
+      final assignedStaff = detail['staff_id'];
+      final staffName = assignedStaff != null
+          ? '${assignedStaff['full_name']?['first'] ?? ''} ${assignedStaff['full_name']?['last'] ?? ''}'
+                .trim()
+          : 'Unassigned';
+      final detailId = detail['_id'];
+      final status = detail['status'] ?? 'pending';
+      final sampleCollected = detail['sample_collected'] ?? false;
+
+      // Check if current staff is assigned to this test
+      final isAssignedToCurrentStaff =
+          assignedStaff != null && assignedStaff['_id'] == _currentStaffId;
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    testName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w500,
+                      color: AppTheme.textDark,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _getStatusColor(status).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    status.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                      color: _getStatusColor(status),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(
+                  Icons.person,
+                  size: 14,
+                  color: assignedStaff != null
+                      ? AppTheme.primaryBlue
+                      : Colors.grey,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Staff: $staffName',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: assignedStaff != null
+                        ? AppTheme.primaryBlue
+                        : Colors.grey,
+                  ),
+                ),
+              ],
+            ),
+            if (sampleCollected) ...[
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(
+                    Icons.check_circle,
+                    size: 14,
+                    color: AppTheme.successGreen,
+                  ),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Sample Collected',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.successGreen,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (isAssignedToCurrentStaff) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  if (!sampleCollected &&
+                      (status == 'assigned' || status == 'pending')) ...[
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _collectSample(detailId),
+                        icon: const Icon(Icons.science, size: 14),
+                        label: const Text('Collect Sample'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryBlue,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          textStyle: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  if (sampleCollected &&
+                      (status == 'collected' || status == 'in_progress')) ...[
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _uploadResult(detailId),
+                        icon: const Icon(Icons.upload_file, size: 14),
+                        label: const Text('Upload Result'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.successGreen,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          textStyle: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ],
+        ),
+      );
+    }).toList();
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'pending':
+        return Colors.orange;
+      case 'assigned':
+        return AppTheme.primaryBlue;
+      case 'collected':
+        return Colors.purple;
+      case 'in_progress':
+        return Colors.blue;
+      case 'completed':
+        return AppTheme.successGreen;
+      case 'cancelled':
+        return AppTheme.errorRed;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Widget _buildAllLabTestsList() {
+    final tests = _allLabTests?['tests'] as List<dynamic>? ?? [];
+
+    if (_isLabTestsLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (tests.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Text('No tests found in the lab'),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: tests.map((test) => _buildLabTestCard(test)).toList(),
+    );
+  }
+
+  Widget _buildLabTestCard(Map<String, dynamic> test) {
+    final testName = test['test_name'] as String? ?? 'Unknown Test';
+    final testId = test['_id']?.toString();
+    final assignedStaff = test['assigned_staff'] as Map<String, dynamic>?;
+    final isAssigned = assignedStaff != null;
+    final assignedStaffName = isAssigned
+        ? '${assignedStaff['full_name']?['first'] ?? ''} ${assignedStaff['full_name']?['last'] ?? ''}'
+              .trim()
+        : 'Unassigned';
+
+    return AnimatedCard(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  isAssigned ? Icons.assignment_turned_in : Icons.assignment,
+                  color: isAssigned
+                      ? AppTheme.successGreen
+                      : AppTheme.warningYellow,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    testName,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isAssigned
+                        ? AppTheme.successGreen.withValues(alpha: 0.2)
+                        : AppTheme.warningYellow.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    isAssigned ? 'Assigned' : 'Unassigned',
+                    style: TextStyle(
+                      color: isAssigned
+                          ? AppTheme.successGreen
+                          : AppTheme.warningYellow,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Assigned to: $assignedStaffName',
+              style: TextStyle(
+                color: isAssigned ? Colors.black : AppTheme.warningYellow,
+                fontWeight: isAssigned ? FontWeight.normal : FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (!isAssigned)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.person_add),
+                  label: const Text('Assign to Me'),
+                  onPressed: testId != null && testId.isNotEmpty
+                      ? () => _assignTestToMe(testId)
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryBlue,
+                  ),
+                ),
+              )
+            else
+              const Text(
+                'This test is already assigned to a staff member',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildSampleCollectionView() {
@@ -1140,6 +2759,13 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
   }
 
   Widget _buildResultUploadView() {
+    // Load results for upload if not already loaded
+    if (_allResultsForUpload == null && !_isResultsForUploadLoading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadResultsForUpload();
+      });
+    }
+
     return AppAnimations.pageDepthTransition(
       SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -1156,7 +2782,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
             const SizedBox(height: 16),
             AppAnimations.fadeIn(
               Text(
-                'Upload test results for completed tests',
+                'Upload test results for any test in the lab',
                 style: Theme.of(context).textTheme.bodyLarge,
               ),
               delay: 200.ms,
@@ -1165,82 +2791,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
             // Show tests that need result upload
             AppAnimations.fadeIn(_buildResultUploadList(), delay: 300.ms),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBarcodeGenerationView() {
-    // Get orders that don't have barcodes
-    final testsByStatus = _assignedTests?['tests_by_status'] as Map? ?? {};
-    final allTests = [
-      ...(testsByStatus['assigned'] as List? ?? []),
-      ...(testsByStatus['collected'] as List? ?? []),
-      ...(testsByStatus['in_progress'] as List? ?? []),
-      ...(testsByStatus['urgent'] as List? ?? []),
-    ];
-
-    // Get unique orders that don't have barcodes
-    final ordersWithoutBarcodes = allTests
-        .where((test) => (test['order_barcode'] as String?)?.isEmpty ?? true)
-        .fold<Map<String, Map<String, dynamic>>>({}, (map, test) {
-          final orderId =
-              test['order_id']?.toString() ??
-              test['order_id']?['_id']?.toString();
-          if (orderId != null && !map.containsKey(orderId)) {
-            map[orderId] = test;
-          }
-          return map;
-        })
-        .values
-        .toList();
-
-    return RefreshIndicator(
-      onRefresh: _loadAssignedTests,
-      child: AppAnimations.pageDepthTransition(
-        SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              AppAnimations.blurFadeIn(
-                Text(
-                  'Order Barcode Generation',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                delay: 100.ms,
-              ),
-              const SizedBox(height: 16),
-              AppAnimations.fadeIn(
-                Text(
-                  'Generate unique barcodes for orders. Each barcode will be assigned to all test samples in that order.',
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-                delay: 200.ms,
-              ),
-              const SizedBox(height: 24),
-              if (_isTestsLoading)
-                const Center(child: CircularProgressIndicator())
-              else if (ordersWithoutBarcodes.isEmpty)
-                AppAnimations.fadeIn(
-                  const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(32),
-                      child: Text('No orders requiring barcode generation'),
-                    ),
-                  ),
-                  delay: 300.ms,
-                )
-              else
-                ...ordersWithoutBarcodes.map(
-                  (test) => AppAnimations.elasticSlideIn(
-                    _buildOrderBarcodeCard(test),
-                    delay:
-                        300.ms + (ordersWithoutBarcodes.indexOf(test) * 100).ms,
-                  ),
-                ),
-            ],
-          ),
         ),
       ),
     );
@@ -1269,6 +2819,32 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
               delay: 200.ms,
             ),
             const SizedBox(height: 24),
+            AppAnimations.elasticSlideIn(
+              TextField(
+                decoration: InputDecoration(
+                  hintText: 'Search by item name or code...',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _inventorySearchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            setState(() => _inventorySearchQuery = '');
+                          },
+                        )
+                      : null,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                ),
+                onChanged: (value) {
+                  setState(() => _inventorySearchQuery = value);
+                },
+              ),
+              delay: 150.ms,
+            ),
+            const SizedBox(height: 16),
             AppAnimations.elasticSlideIn(
               AnimatedCard(
                 child: Padding(
@@ -1318,9 +2894,14 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
               SizedBox(
                 height: MediaQuery.of(context).size.height * 0.6,
                 child: PaginatedList<Map<String, dynamic>>(
+                  key: ValueKey(
+                    _inventorySearchQuery,
+                  ), // Force rebuild on search change
                   fetchData: _fetchInventoryPage,
                   itemBuilder: _buildInventoryItemCard,
-                  emptyMessage: 'No inventory items found',
+                  emptyMessage: _inventorySearchQuery.isNotEmpty
+                      ? 'No items found matching "$_inventorySearchQuery"'
+                      : 'No inventory items found',
                   loadingMessage: 'Loading inventory...',
                   initialLimit: 20,
                   header: Padding(
@@ -1349,59 +2930,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     );
   }
 
-  Widget _buildNotificationsView() {
-    return AppAnimations.pageDepthTransition(
-      Padding(
-        padding: const EdgeInsets.all(16),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              AppAnimations.floating(
-                AppAnimations.morphIn(
-                  Icon(
-                    Icons.notifications,
-                    size: 80,
-                    color: AppTheme.primaryBlue,
-                  ),
-                  delay: 200.ms,
-                ),
-              ),
-              const SizedBox(height: 16),
-              AppAnimations.blurFadeIn(
-                Text(
-                  'Notifications',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                delay: 400.ms,
-              ),
-              const SizedBox(height: 8),
-              AppAnimations.elasticSlideIn(
-                Text(
-                  'View your notifications and updates',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  textAlign: TextAlign.center,
-                ),
-                delay: 600.ms,
-              ),
-              const SizedBox(height: 24),
-              AppAnimations.tilt3D(
-                AnimatedButton(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.notifications),
-                    label: const Text('View Notifications'),
-                    onPressed: _showNotificationsDialog,
-                  ),
-                ),
-                delay: 800.ms,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildSampleCollectionList() {
     final testsByStatus = _assignedTests?['tests_by_status'] as Map? ?? {};
     final assignedTests = testsByStatus['assigned'] as List? ?? [];
@@ -1424,12 +2952,19 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
   }
 
   Widget _buildResultUploadList() {
-    final testsByStatus = _assignedTests?['tests_by_status'] as Map? ?? {};
-    final collectedTests = testsByStatus['collected'] as List? ?? [];
-    final inProgressTests = testsByStatus['in_progress'] as List? ?? [];
-    final allTests = [...collectedTests, ...inProgressTests];
+    final results = _allResultsForUpload?['results'] as List<dynamic>? ?? [];
 
-    if (allTests.isEmpty) {
+    // Filter for results that don't have data yet (pending results)
+    final pendingResults = results.where((result) {
+      final resultData = result['result'] as Map<String, dynamic>?;
+      return resultData == null || resultData.isEmpty;
+    }).toList();
+
+    if (_isResultsForUploadLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (pendingResults.isEmpty) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(32),
@@ -1440,7 +2975,9 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: allTests.map((test) => _buildResultUploadCard(test)).toList(),
+      children: pendingResults
+          .map((result) => _buildResultUploadCard(result))
+          .toList(),
     );
   }
 
@@ -1492,11 +3029,19 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     );
   }
 
-  Widget _buildResultUploadCard(Map<String, dynamic> test) {
-    final testName = test['test_name'] as String? ?? 'Unknown Test';
-    final patientName = test['patient_name'] as String? ?? 'N/A';
-    final status = test['status'] as String? ?? 'pending';
-    final testId = test['_id']?.toString();
+  Widget _buildResultUploadCard(Map<String, dynamic> result) {
+    final test = result['test_id'] as Map<String, dynamic>?;
+    final testName = test?['test_name'] as String? ?? 'Unknown Test';
+    final patient = result['patient_id'] as Map<String, dynamic>?;
+    final patientName = patient != null
+        ? '${patient['full_name']?['first'] ?? ''} ${patient['full_name']?['last'] ?? ''}'
+              .trim()
+        : 'Unknown Patient';
+    final order = result['order_id'] as Map<String, dynamic>?;
+    final orderId = order?['_id']?.toString();
+    final sampleBarcode =
+        result['sample_barcode'] as String? ?? 'Not generated';
+    final detailId = result['_id']?.toString();
 
     return AnimatedCard(
       margin: const EdgeInsets.only(bottom: 16),
@@ -1521,17 +3066,13 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: status == 'collected'
-                        ? AppTheme.secondaryTeal.withValues(alpha: 0.2)
-                        : AppTheme.warningYellow.withValues(alpha: 0.2),
+                    color: AppTheme.secondaryTeal.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Text(
-                    status == 'collected' ? 'Collected' : 'In Progress',
+                  child: const Text(
+                    'Ready for Upload',
                     style: TextStyle(
-                      color: status == 'collected'
-                          ? AppTheme.secondaryTeal
-                          : AppTheme.warningYellow,
+                      color: AppTheme.secondaryTeal,
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                     ),
@@ -1541,92 +3082,22 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
             ),
             const SizedBox(height: 8),
             Text('Patient: $patientName'),
+            Text('Sample Barcode: $sampleBarcode'),
+            if (orderId != null)
+              Text('Order: #${orderId.substring(0, 8).toUpperCase()}'),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.upload),
                 label: const Text('Upload Result'),
-                onPressed: testId != null && testId.isNotEmpty
-                    ? () => _showUploadResultDialog(test)
+                onPressed: detailId != null && detailId.isNotEmpty
+                    ? () => _showUploadResultDialog(result)
                     : null,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryBlue,
                 ),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOrderBarcodeCard(Map<String, dynamic> test) {
-    final authProvider = Provider.of<StaffAuthProvider>(context);
-
-    final orderId =
-        test['order_id']?.toString() ?? test['order_id']?['_id']?.toString();
-    if (orderId == null) return const SizedBox.shrink();
-
-    final patientName =
-        test['patient']?['name'] as String? ?? 'Unknown Patient';
-
-    // Count tests in this order
-    final testsByStatus = _assignedTests?['tests_by_status'] as Map? ?? {};
-    final allTests = [
-      ...(testsByStatus['assigned'] as List? ?? []),
-      ...(testsByStatus['collected'] as List? ?? []),
-      ...(testsByStatus['in_progress'] as List? ?? []),
-      ...(testsByStatus['urgent'] as List? ?? []),
-    ];
-
-    final testCount = allTests
-        .where(
-          (t) =>
-              t['order_id']?.toString() == orderId ||
-              t['order_id']?['_id']?.toString() == orderId,
-        )
-        .length;
-
-    return AnimatedCard(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.qr_code, color: AppTheme.primaryBlue),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Order Barcode',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Patient: $patientName',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            Text(
-              'Tests in Order: $testCount',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            Text(
-              'Order ID: $orderId',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 16),
-            BarcodeDisplayWidget(
-              orderId: orderId,
-              token: authProvider.token ?? '',
-              onBarcodeGenerated: () {
-                _loadAssignedTests(); // Refresh the list
-              },
             ),
           ],
         ),
@@ -1959,6 +3430,46 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     final sampleBarcode = test['sample_barcode'] as String? ?? 'Not generated';
     final deviceName = test['device']?['name'] as String?;
 
+    // For completed tests, use ExpansionTile to show results
+    if (status == 'completed') {
+      return AnimatedCard(
+        margin: const EdgeInsets.only(bottom: 8),
+        child: ExpansionTile(
+          leading: CircleAvatar(
+            backgroundColor: _getStatusColor(status).withValues(alpha: 0.2),
+            child: Icon(_getStatusIcon(status), color: _getStatusColor(status)),
+          ),
+          title: Text(testName),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Patient: $patientName'),
+              Text('Sample Barcode: $sampleBarcode'),
+              if (deviceName != null) Text('Device: $deviceName'),
+            ],
+          ),
+          children: [
+            // Test Results Section
+            Container(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Test Results',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 8),
+                  _buildResultDisplay(test),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // For non-completed tests, use regular ListTile
     return AnimatedCard(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
@@ -1979,6 +3490,230 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
         isThreeLine: true,
       ),
     );
+  }
+
+  Widget _buildResultDisplay(Map<String, dynamic> test) {
+    final result = test['result'] as Map<String, dynamic>?;
+
+    if (result == null) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.grey[100],
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Text(
+          'No results available.',
+          style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey),
+        ),
+      );
+    }
+
+    final hasComponents = result['has_components'] as bool? ?? false;
+    final isAbnormal = result['is_abnormal'] as bool? ?? false;
+
+    if (hasComponents) {
+      // Display results with components
+      final components = result['components'] as List<dynamic>? ?? [];
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (isAbnormal)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.errorRed.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: AppTheme.errorRed.withValues(alpha: 0.3),
+                ),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.warning, color: AppTheme.errorRed, size: 16),
+                  SizedBox(width: 4),
+                  Text(
+                    'Abnormal Results',
+                    style: TextStyle(
+                      color: AppTheme.errorRed,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 8),
+          ...components.map((component) {
+            final componentName =
+                component['component_name'] as String? ?? 'Unknown';
+            final value = component['component_value'] as String? ?? 'N/A';
+            final units = component['units'] as String? ?? '';
+            final referenceRange =
+                component['reference_range'] as String? ?? '';
+            final isComponentAbnormal =
+                component['is_abnormal'] as bool? ?? false;
+            final remarks = component['remarks'] as String? ?? '';
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isComponentAbnormal
+                    ? AppTheme.errorRed.withValues(alpha: 0.05)
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isComponentAbnormal
+                      ? AppTheme.errorRed.withValues(alpha: 0.3)
+                      : Colors.grey[300]!,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          componentName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                      if (isComponentAbnormal)
+                        const Icon(
+                          Icons.warning,
+                          color: AppTheme.errorRed,
+                          size: 16,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Text(
+                        'Result: $value ${units.isNotEmpty ? units : ''}',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isComponentAbnormal
+                              ? AppTheme.errorRed
+                              : Colors.black,
+                          fontWeight: isComponentAbnormal
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (referenceRange.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Reference: $referenceRange',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
+                  ],
+                  if (remarks.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Remarks: $remarks',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          }),
+        ],
+      );
+    } else {
+      // Display simple result without components
+      final resultValue = result['result_value'] as String? ?? 'N/A';
+      final units = result['units'] as String? ?? '';
+      final referenceRange = result['reference_range'] as String? ?? '';
+      final remarks = result['remarks'] as String? ?? '';
+
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isAbnormal
+              ? AppTheme.errorRed.withValues(alpha: 0.05)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isAbnormal
+                ? AppTheme.errorRed.withValues(alpha: 0.3)
+                : Colors.grey[300]!,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (isAbnormal)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.errorRed.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: AppTheme.errorRed.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.warning, color: AppTheme.errorRed, size: 16),
+                    SizedBox(width: 4),
+                    Text(
+                      'Abnormal Result',
+                      style: TextStyle(
+                        color: AppTheme.errorRed,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Text(
+              'Result: $resultValue ${units.isNotEmpty ? units : ''}',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: isAbnormal ? AppTheme.errorRed : Colors.black,
+              ),
+            ),
+            if (referenceRange.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Reference Range: $referenceRange',
+                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+              ),
+            ],
+            if (remarks.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Remarks: $remarks',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontStyle: FontStyle.italic,
+                  color: Colors.grey[700],
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
   }
 
   Widget? _buildActionButton(
@@ -2017,23 +3752,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
       return const Icon(Icons.check_circle, color: AppTheme.successGreen);
     }
     return null;
-  }
-
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'urgent':
-        return AppTheme.errorRed;
-      case 'assigned':
-        return AppTheme.primaryBlue;
-      case 'collected':
-        return AppTheme.secondaryTeal;
-      case 'in_progress':
-        return AppTheme.warningYellow;
-      case 'completed':
-        return AppTheme.successGreen;
-      default:
-        return AppTheme.textLight;
-    }
   }
 
   IconData _getStatusIcon(String status) {

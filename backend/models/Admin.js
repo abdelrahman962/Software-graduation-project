@@ -35,7 +35,7 @@ adminSchema.pre('save', async function(next) {
       mongoose.model('Patient').findOne({ username: this.username }),
       mongoose.model('Doctor').findOne({ username: this.username }),
       mongoose.model('Staff').findOne({ username: this.username }),
-      mongoose.model('Owner').findOne({ username: this.username }),
+      mongoose.model('LabOwner').findOne({ username: this.username }),
       mongoose.model('Admin').findOne({ username: this.username, _id: { $ne: this._id } })
     ]);
     

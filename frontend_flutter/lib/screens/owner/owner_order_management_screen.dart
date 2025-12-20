@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import 'package:responsive_framework/responsive_framework.dart';
+import 'dart:math';
 import '../../providers/owner_auth_provider.dart';
 import '../../services/owner_api_service.dart';
 import '../../config/theme.dart';
@@ -88,7 +89,7 @@ class _OwnerOrderManagementScreenState
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Order #${order['_id']?.toString().substring(0, 8) ?? 'N/A'}',
+                'Order #${order['_id']?.toString().substring(0, min(8, order['_id']?.toString().length ?? 0)) ?? 'N/A'}',
                 style: const TextStyle(fontSize: 18),
               ),
             ),

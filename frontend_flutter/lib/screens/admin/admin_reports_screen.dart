@@ -877,7 +877,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(
-                headingRowColor: MaterialStateProperty.all(
+                headingRowColor: WidgetStateProperty.all(
                   AppTheme.primaryBlue.withOpacity(0.1),
                 ),
                 columns: headers

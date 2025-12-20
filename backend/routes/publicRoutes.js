@@ -56,6 +56,13 @@ router.get('/feedback/system', publicController.getSystemFeedback);
 router.post('/contact', publicController.submitContactForm);
 
 /**
+ * @route   POST /api/public/owner/register
+ * @desc    Lab owner self-registration (pending admin approval)
+ * @access  Public
+ */
+router.post('/owner/register', publicController.registerOwner);
+
+/**
  * @route   POST /api/public/login
  * @desc    Unified login endpoint - checks all user types in one request
  * @access  Public

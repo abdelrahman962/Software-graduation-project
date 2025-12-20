@@ -18,10 +18,10 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Load system feedback for testimonials (4 items for home page display)
+    // Load system feedback for testimonials (ensure representation from all user roles)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<MarketingProvider>().loadSystemFeedback(
-        limit: 4,
+        limit: 12, // Load more to ensure representation from all roles
         minRating: 4,
       );
       context.read<MarketingProvider>().loadAdminContactInfo();
@@ -387,10 +387,13 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }
 
-        final feedback = marketingProvider.systemFeedback;
-        if (feedback.isEmpty) {
+        final allFeedback = marketingProvider.systemFeedback;
+        if (allFeedback.isEmpty) {
           return const SizedBox.shrink();
         }
+
+        // Select diverse feedback representing all user roles
+        final feedback = _selectDiverseFeedback(allFeedback);
 
         return Container(
           padding: EdgeInsets.symmetric(
@@ -412,7 +415,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Trusted by Lab Owners, Staff, Doctors & Patients',
+                      'Real Feedback from Lab Owners, Staff, Doctors & Patients',
                       style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         fontSize: isVerySmall ? 12 : (isMobile ? 14 : 16),
                         color: Theme.of(
@@ -536,6 +539,57 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Helper methods for testimonials section
+  List<dynamic> _selectDiverseFeedback(List<dynamic> allFeedback) {
+    // Group feedback by user role
+    final feedbackByRole = <String, List<dynamic>>{};
+    for (final item in allFeedback) {
+      final role = item.userModel as String;
+      feedbackByRole[role] = (feedbackByRole[role] ?? [])..add(item);
+    }
+
+    // Target roles to include
+    final targetRoles = ['Owner', 'Staff', 'Doctor', 'Patient'];
+    final selectedFeedback = <dynamic>[];
+
+    // First, try to get at least one from each role
+    for (final role in targetRoles) {
+      final roleFeedback = feedbackByRole[role] ?? [];
+      if (roleFeedback.isNotEmpty) {
+        // Sort by rating (highest first) and take the best one
+        roleFeedback.sort(
+          (a, b) => (b.rating as int).compareTo(a.rating as int),
+        );
+        selectedFeedback.add(roleFeedback.first);
+      }
+    }
+
+    // If we don't have enough, fill with remaining feedback
+    if (selectedFeedback.length < 4) {
+      final remainingFeedback = allFeedback
+          .where((item) => !selectedFeedback.contains(item))
+          .toList();
+
+      // Sort remaining by rating and add top ones
+      remainingFeedback.sort(
+        (a, b) => (b.rating as int).compareTo(a.rating as int),
+      );
+
+      for (final item in remainingFeedback) {
+        if (selectedFeedback.length >= 4) break;
+        selectedFeedback.add(item);
+      }
+    }
+
+    // If we still don't have 4, just take the top 4
+    if (selectedFeedback.length < 4) {
+      final topFeedback = allFeedback.take(4).toList();
+      selectedFeedback.clear();
+      selectedFeedback.addAll(topFeedback);
+    }
+
+    return selectedFeedback;
+  }
+
   Color _getRoleColor(String role) {
     switch (role) {
       case 'Owner':
@@ -571,6 +625,12 @@ class _HomeScreenState extends State<HomeScreen> {
       return 'Anonymous ${item.userModel}';
     }
 
+    // Use the direct userName from backend if available
+    if (item.userName != null && item.userName!.isNotEmpty) {
+      return item.userName!;
+    }
+
+    // Fallback to user object if populated
     if (item.user != null) {
       // Check for lab_name (Owner)
       if (item.user['lab_name'] != null) {

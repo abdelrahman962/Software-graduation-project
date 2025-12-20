@@ -194,7 +194,7 @@ class _DoctorPatientReportScreenState extends State<DoctorPatientReportScreen> {
                 ),
               ),
               pw.SizedBox(height: 8),
-              pw.Table.fromTextArray(
+              pw.TableHelper.fromTextArray(
                 headerStyle: pw.TextStyle(
                   fontWeight: pw.FontWeight.bold,
                   color: PdfColors.white,

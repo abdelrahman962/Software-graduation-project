@@ -12,8 +12,6 @@ class PublicApiService {
     required String phone,
     required String address,
     required String email,
-    required String username,
-    required String password,
     required String selectedPlan,
     String? socialStatus,
     String? qualification,
@@ -30,8 +28,6 @@ class PublicApiService {
       'phone': phone,
       'address': address,
       'email': email,
-      'username': username,
-      'password': password,
       'selected_plan': selectedPlan,
       if (socialStatus != null) 'social_status': socialStatus,
       if (qualification != null) 'qualification': qualification,
@@ -126,6 +122,37 @@ class PublicApiService {
       'phone': phone,
       'lab_name': labName,
       'message': message,
+    });
+  }
+
+  // Register new lab owner (self-service registration)
+  static Future<Map<String, dynamic>> registerOwner({
+    required Map<String, String> fullName, // {first, middle, last}
+    required String identityNumber,
+    required String birthday,
+    required String gender,
+    required String phoneNumber,
+    required String email,
+    required Map<String, String> address, // {city, street, building_number}
+    required String labName,
+    required String labLicenseNumber,
+    required String username,
+    required String password,
+    int subscriptionPeriodMonths = 1, // Default 1 month
+  }) async {
+    return await ApiService.post('/public/owner/register', {
+      'full_name': fullName,
+      'identity_number': identityNumber,
+      'birthday': birthday,
+      'gender': gender,
+      'phone_number': phoneNumber,
+      'email': email,
+      'address': address,
+      'lab_name': labName,
+      'lab_license_number': labLicenseNumber,
+      'username': username,
+      'password': password,
+      'subscription_period_months': subscriptionPeriodMonths,
     });
   }
 }

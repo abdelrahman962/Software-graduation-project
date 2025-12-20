@@ -12,7 +12,13 @@ const invoiceSchema = new mongoose.Schema({
   payment_date: { type: Date }, // When payment was received
   paid_by: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' }, // Staff who recorded payment
   remarks: String,
-  owner_id: { type: mongoose.Schema.Types.ObjectId, ref: 'LabOwner' }
+  owner_id: { type: mongoose.Schema.Types.ObjectId, ref: 'LabOwner' },
+  items: [{
+    test_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Test' },
+    test_name: String,
+    price: Number,
+    quantity: { type: Number, default: 1 }
+  }]
 });
 
 module.exports = mongoose.model('Invoices', invoiceSchema);

@@ -15,6 +15,7 @@ class Feedback {
   // Populated fields (from API)
   final Map<String, dynamic>? target;
   final Map<String, dynamic>? user;
+  final String? userName; // Direct user name from backend
 
   Feedback({
     required this.id,
@@ -31,6 +32,7 @@ class Feedback {
     required this.updatedAt,
     this.target,
     this.user,
+    this.userName,
   });
 
   factory Feedback.fromJson(Map<String, dynamic> json) {
@@ -42,7 +44,11 @@ class Feedback {
       targetId: json['target_id'] ?? '',
       rating: json['rating'] ?? 0,
       message: json['message'],
-      isAnonymous: json['is_anonymous'] ?? false,
+      isAnonymous: json['is_anonymous'] is bool
+          ? json['is_anonymous']
+          : json['is_anonymous'] == 'false' || json['is_anonymous'] == false
+          ? false
+          : true,
       response: json['response'],
       responseDate: json['response_date'] != null
           ? DateTime.parse(json['response_date'])
@@ -53,8 +59,9 @@ class Feedback {
       updatedAt: json['updatedAt'] != null
           ? DateTime.parse(json['updatedAt'])
           : DateTime.now(),
-      target: json['target_id'],
-      user: json['user_id'],
+      target: json['target'],
+      user: json['user'],
+      userName: json['user_name'],
     );
   }
 

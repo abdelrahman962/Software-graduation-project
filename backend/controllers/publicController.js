@@ -11,6 +11,8 @@ const Admin = require("../models/Admin");
 const jwt = require('jsonwebtoken');
 const sendEmail = require("../utils/sendEmail");
 const sendSMS = require("../utils/sendSMS");
+const { sendLabReport, sendAppointmentReminder, sendWhatsAppMessage } = require("../utils/sendWhatsApp");
+const { sendLabReportNotification, sendAppointmentReminderNotification } = require("../utils/sendNotification");
 
 /**
  * @desc    Patient submits registration form with personal info and test orders
@@ -119,7 +121,7 @@ exports.submitRegistration = async (req, res) => {
     });
 
     // Generate account creation link
-    const registrationLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/register/complete?token=${registrationToken}`;
+    const registrationLink = `${process.env.FRONTEND_URL || 'http://localhost:8080'}/register/complete?token=${registrationToken}`;
 
     // Send email with registration link
     const emailSubject = `Complete Your Account Registration - ${lab.lab_name}`;
@@ -150,11 +152,22 @@ Best regards,
 ${lab.lab_name}
     `;
 
-    await sendEmail(email, emailSubject, emailMessage);
 
-    // Send SMS with registration link
-    const smsMessage = `Hello ${full_name.first}! Complete your registration at ${lab.lab_name}: ${registrationLink}. Tests: ${tests.length}, Total: ${totalCost} ILS. Link expires in 7 days.`;
-    await sendSMS(phone_number, smsMessage);
+    // Try WhatsApp first, fallback to email if needed
+    const whatsappMessage = `Hello ${full_name.first} ${full_name.last},\n\nThank you for choosing ${lab.lab_name}!\nYour test order has been submitted successfully. To complete your registration and access your account, please click the link below:\n${registrationLink}\n\nOrder Details:\n- Tests Ordered: ${tests.length}\n- Total Cost: ${totalCost} ILS\n- Lab: ${lab.lab_name}\n\nThis link will expire in 7 days.\n\nNext Steps:\n1. Click the link above to create your account\n2. Visit the lab with your ID for sample collection\n3. Track your results online after processing`;
+    const whatsappSuccess = await sendWhatsAppMessage(
+      phone_number,
+      whatsappMessage,
+      [],
+      true, // fallback to email
+      emailSubject,
+      emailMessage
+    );
+    if (!whatsappSuccess) {
+      // Fallback to SMS if both WhatsApp and email fail
+      const smsMessage = `Hello ${full_name.first}! Complete your registration at ${lab.lab_name}: ${registrationLink}. Tests: ${tests.length}, Total: ${totalCost} ILS. Link expires in 7 days.`;
+      await sendSMS(phone_number, smsMessage);
+    }
 
     res.status(201).json({
       success: true,
@@ -412,6 +425,50 @@ exports.completeRegistration = async (req, res) => {
       registration_token_expires: null
     });
 
+    // Get order details to calculate invoice
+    const OrderDetails = require('../models/OrderDetails');
+    const Test = require('../models/Test');
+    const Invoice = require('../models/Invoices');
+    const Notification = require('../models/Notification');
+
+    const orderDetails = await OrderDetails.find({ order_id: order._id })
+      .populate('test_id', 'test_name price');
+
+    // Create invoice automatically
+    const subtotal = orderDetails.reduce((sum, detail) => {
+      return sum + (detail.test_id.price || 0);
+    }, 0);
+
+    const invoice = await Invoice.create({
+      order_id: order._id,
+      invoice_date: new Date(),
+      subtotal,
+      discount: 0,
+      total_amount: subtotal,
+      payment_status: 'paid', // Mark as paid initially
+      payment_method: 'cash', // Default payment method
+      payment_date: new Date(),
+      paid_by: patient._id,
+      owner_id: order.owner_id,
+      items: orderDetails.map(d => ({
+        test_id: d.test_id._id,
+        test_name: d.test_id.test_name,
+        price: d.test_id.price,
+        quantity: 1
+      }))
+    });
+
+    // Send invoice notification to patient
+    await Notification.create({
+      sender_id: order.owner_id,
+      sender_model: 'Owner',
+      receiver_id: patient._id,
+      receiver_model: 'Patient',
+      type: 'invoice',
+      title: 'Invoice Generated',
+      message: `Your invoice has been generated. Total: ${subtotal} ILS. Payment status: Paid. Please visit the lab for sample collection.`
+    });
+
     // Send welcome email
     const welcomeSubject = `Welcome to ${order.owner_id?.lab_name || 'MedLab System'}`;
     const welcomeMessage = `
@@ -434,7 +491,22 @@ Best regards,
 MedLab System
     `;
 
-    await sendEmail(patient.email, welcomeSubject, welcomeMessage);
+
+    // Try WhatsApp first, fallback to email if needed
+    const whatsappWelcome = `Hello ${patient.full_name.first},\n\nYour account has been successfully created!\n\nLogin Credentials:\n- Username: ${username}\n- Patient ID: ${newPatientId}\n\nYou can now:\n- Login to track your test results\n- View your order history\n- Schedule appointments\n\nPlease visit the lab with your ID for sample collection.\n\nBest regards,\nMedLab System`;
+    const whatsappSuccess = await sendWhatsAppMessage(
+      patient.phone_number,
+      whatsappWelcome,
+      [],
+      true, // fallback to email
+      welcomeSubject,
+      welcomeMessage
+    );
+    if (!whatsappSuccess) {
+      // Fallback to SMS if both WhatsApp and email fail
+      const smsMessage = `Hello ${patient.full_name.first}! Your account has been created. Username: ${username}, Patient ID: ${newPatientId}. Please visit the lab with your ID for sample collection.`;
+      await sendSMS(patient.phone_number, smsMessage);
+    }
 
     // Notify lab owner
     await Notification.create({
@@ -473,7 +545,6 @@ exports.getSystemFeedback = async (req, res) => {
 
     // Build query filter
     const query = {
-      target_type: 'system',
       rating: { $gte: parseInt(minRating) }
     };
 
@@ -485,7 +556,7 @@ exports.getSystemFeedback = async (req, res) => {
     const feedback = await Feedback.find(query)
     .populate({
       path: 'user_id',
-      select: 'full_name lab_name username'
+      select: 'name full_name lab_name username'
     })
     .sort({ rating: -1, createdAt: -1 })
     .limit(parseInt(limit))
@@ -501,6 +572,8 @@ exports.getSystemFeedback = async (req, res) => {
           userName = item.user_id.lab_name;
         } else if (item.user_id.full_name) {
           userName = `${item.user_id.full_name.first} ${item.user_id.full_name.last}`;
+        } else if (item.user_id.name) {
+          userName = `${item.user_id.name.first} ${item.user_id.name.last}`;
         } else if (item.user_id.username) {
           userName = item.user_id.username;
         }
@@ -593,6 +666,26 @@ exports.submitContactForm = async (req, res) => {
       // Don't fail the request if email fails, just log it
     }
 
+    // Send WhatsApp notification to admin
+    if (process.env.ADMIN_PHONE) {
+      try {
+        const adminWhatsAppMessage = `🔔 New Lab Contact Inquiry\n\n📋 Laboratory: ${lab_name}\n👤 Contact: ${name}\n📧 Email: ${email}\n📱 Phone: ${phone || 'Not provided'}\n\n💬 Message:\n${message}\n\nPlease review and follow up within 24-48 hours.`;
+
+        await sendWhatsAppMessage(
+          process.env.ADMIN_PHONE,
+          adminWhatsAppMessage,
+          [],
+          false, // Don't fallback to email since we already sent email above
+          '',
+          ''
+        );
+        console.log('WhatsApp notification sent to admin for new contact inquiry');
+      } catch (whatsappError) {
+        console.error('Failed to send WhatsApp notification to admin:', whatsappError);
+        // Don't fail the request if WhatsApp fails
+      }
+    }
+
     // Send confirmation email to the contact person
     const confirmationSubject = 'Thank you for your interest in MedLab System';
     const confirmationBody = `
@@ -619,6 +712,200 @@ exports.submitContactForm = async (req, res) => {
 
   } catch (err) {
     console.error("Error submitting contact form:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Lab Owner Self-Registration
+ * @route   POST /api/public/owner/register
+ * @access  Public
+ */
+exports.registerOwner = async (req, res) => {
+  try {
+    const {
+      // Personal Information
+      full_name,
+      identity_number,
+      birthday,
+      gender,
+      phone_number,
+      email,
+      address,
+      
+      // Lab Information
+      lab_name,
+      lab_license_number,
+      subscription_period_months = 1
+    } = req.body;
+
+    // Validate required fields
+    if (!full_name || !full_name.first || !full_name.last) {
+      return res.status(400).json({ message: "First name and last name are required" });
+    }
+
+    if (!identity_number || !birthday || !gender || !phone_number || !email) {
+      return res.status(400).json({ message: "All personal information fields are required" });
+    }
+
+    if (!lab_name) {
+      return res.status(400).json({ message: "Laboratory name is required" });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: "Please provide a valid email address" });
+    }
+
+    // Check if email already exists
+    const existingOwner = await LabOwner.findOne({ email });
+    if (existingOwner) {
+      return res.status(400).json({ message: "An account with this email already exists" });
+    }
+
+    // Check if identity number already exists
+    const existingIdentity = await LabOwner.findOne({ identity_number });
+    if (existingIdentity) {
+      return res.status(400).json({ message: "An account with this identity number already exists" });
+    }
+
+    // Get default admin (first admin) to assign to this owner
+    const defaultAdmin = await Admin.findOne().sort({ createdAt: 1 });
+    if (!defaultAdmin) {
+      return res.status(500).json({ message: "System not properly configured. No admin found." });
+    }
+
+    // Calculate subscription pricing tier
+    const subscriptionPricing = {
+      tier: 'starter',
+      monthlyFee: 50,
+      patientLimit: 500,
+      description: 'Up to 500 patients - $50/month'
+    };
+
+    // Generate temporary username and password (will be sent upon approval)
+    const tempUsername = `${full_name.first.toLowerCase()}${full_name.last.toLowerCase()}${Math.floor(Math.random() * 1000)}`;
+    const tempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
+
+    // Create owner account with is_active: false (pending approval)
+    const newOwner = new LabOwner({
+      name: full_name,
+      identity_number,
+      birthday,
+      gender,
+      phone_number,
+      email,
+      address: address || {},
+      lab_name,
+      lab_license_number,
+      username: tempUsername, // Temporary username
+      password: tempPassword, // Temporary password (will be hashed by pre-save hook)
+      admin_id: defaultAdmin._id,
+      is_active: false,
+      status: 'pending',
+      subscriptionFee: subscriptionPricing.monthlyFee,
+      subscription_period_months: parseInt(subscription_period_months) || 1,
+      temp_credentials: {
+        username: tempUsername,
+        password: tempPassword
+      }
+    });
+
+    await newOwner.save();
+
+    // Send confirmation email to owner
+    const ownerEmailSubject = 'Registration Received - Pending Admin Approval';
+    const ownerEmailBody = `
+      <h2>Welcome to MedLab System!</h2>
+      <p>Dear ${full_name.first} ${full_name.last},</p>
+      <p>Thank you for registering your laboratory <strong>${lab_name}</strong> with MedLab System.</p>
+      
+      <h3>Subscription Details:</h3>
+      <p><strong>Monthly Fee:</strong> $${subscriptionPricing.monthlyFee}</p>
+      <p><strong>Plan:</strong> ${subscriptionPricing.description}</p>
+      
+      <h3>Next Steps:</h3>
+      <p>Your registration is currently <strong>pending administrative approval</strong>. Our team will review your application and verify your laboratory information.</p>
+      <p>Once approved, you will receive an email with your login credentials (username and password) that you can use to access your account.</p>
+      <p>After your first login, you can change your password in your profile settings.</p>
+      
+      <p>This process typically takes 24-48 hours. If you have any questions, please contact our support team.</p>
+      
+      <br>
+      <p>Best regards,<br>The MedLab System Team</p>
+    `;
+
+    // TESTING: Email sending disabled
+    // try {
+    //   await sendEmail(email, ownerEmailSubject, ownerEmailBody);
+    // } catch (emailError) {
+    //   console.error('Failed to send owner confirmation email:', emailError);
+    // }
+    console.log('📧 [TESTING] Email would be sent to:', email);
+
+    // Send notification to admin
+    const adminEmailSubject = `New Lab Owner Registration: ${lab_name}`;
+    const adminEmailBody = `
+      <h2>New Laboratory Owner Registration</h2>
+      <p>A new laboratory has registered and is awaiting approval.</p>
+      
+      <h3>Personal Information:</h3>
+      <p><strong>Name:</strong> ${full_name.first} ${full_name.middle || ''} ${full_name.last}</p>
+      <p><strong>Email:</strong> ${email}</p>
+      <p><strong>Phone:</strong> ${phone_number}</p>
+      <p><strong>Identity Number:</strong> ${identity_number}</p>
+      
+      <h3>Laboratory Information:</h3>
+      <p><strong>Lab Name:</strong> ${lab_name}</p>
+      <p><strong>License Number:</strong> ${lab_license_number || 'Not provided'}</p>
+      
+      <h3>Subscription Details:</h3>
+      <p><strong>Subscription Tier:</strong> ${subscriptionPricing.description}</p>
+      <p><strong>Monthly Fee:</strong> $${subscriptionPricing.monthlyFee}</p>
+      
+      <p><strong>Please review and approve/reject this application in the admin panel.</strong></p>
+      <p>Upon approval, login credentials will be automatically generated and sent to the owner.</p>
+    `;
+
+    // TESTING: Email sending disabled
+    // try {
+    //   const adminEmail = defaultAdmin.email || process.env.ADMIN_EMAIL || 'admin@medlabsystem.com';
+    //   await sendEmail(adminEmail, adminEmailSubject, adminEmailBody);
+    // } catch (emailError) {
+    //   console.error('Failed to send admin notification email:', emailError);
+    // }
+    console.log('📧 [TESTING] Admin notification email would be sent');
+
+    // Create notification for admin
+    try {
+      await Notification.create({
+        receiver_id: defaultAdmin._id,
+        receiver_model: 'Admin',
+        type: 'registration',
+        title: 'New Lab Owner Registration',
+        message: `${full_name.first} ${full_name.last} from ${lab_name} has registered and is awaiting approval.`,
+        is_read: false
+      });
+    } catch (notifError) {
+      console.error('Failed to create admin notification:', notifError);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Registration submitted successfully! Your application is pending admin approval. You will receive an email once approved.",
+      subscription: subscriptionPricing,
+      owner: {
+        name: `${full_name.first} ${full_name.last}`,
+        email,
+        lab_name,
+        username,
+        status: 'pending'
+      }
+    });
+
+  } catch (err) {
+    console.error("Error registering owner:", err);
     res.status(500).json({ error: err.message });
   }
 };
@@ -672,7 +959,7 @@ exports.unifiedLogin = async (req, res, next) => {
       },
       {
         model: Staff,
-        role: 'staff',
+        role: 'Staff',
         route: '/staff/dashboard',
         fields: {
           _id: 1,
@@ -745,7 +1032,7 @@ exports.unifiedLogin = async (req, res, next) => {
             tokenPayload.patient_id = user.patient_id;
           } else if (userType.role === 'doctor' && user.doctor_id) {
             tokenPayload.doctor_id = user.doctor_id;
-          } else if (userType.role === 'staff' && user.owner_id) {
+          } else if (userType.role === 'Staff' && user.owner_id) {
             tokenPayload.owner_id = user.owner_id;
           }
 
@@ -775,7 +1062,7 @@ exports.unifiedLogin = async (req, res, next) => {
     }
 
     // If we get here, no valid credentials were found
-    return res.status(401).json({ message: '❌ Invalid credentials' });
+    return res.status(401).json({ message: '❌ Invalid email or password. Please try again.' });
 
   } catch (err) {
     next(err);

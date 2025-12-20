@@ -8,6 +8,7 @@ import '../../widgets/custom_button.dart';
 import '../../widgets/data_table_widget.dart';
 import '../../widgets/confirmation_dialog.dart';
 import '../../widgets/loading_dialog.dart';
+import '../../widgets/feedback_form.dart';
 
 class TestManagementScreen extends StatefulWidget {
   const TestManagementScreen({super.key});
@@ -60,6 +61,25 @@ class _TestManagementScreenState extends State<TestManagementScreen> {
     }
   }
 
+  void _showOwnerFeedbackDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => FeedbackForm(
+        userType: 'owner',
+        targetType: 'system',
+        targetName: 'Medical Lab System',
+        onSubmit: (feedbackData) async {
+          // Submit feedback to API
+          // await OwnerApiService.submitFeedback(feedbackData);
+          // Close the dialog after successful submission
+          if (context.mounted) {
+            Navigator.of(context).pop();
+          }
+        },
+      ),
+    );
+  }
+
   Future<void> _showTestDialog([Map<String, dynamic>? test]) async {
     final nameController = TextEditingController(text: test?['test_name']);
     final testCodeController = TextEditingController(text: test?['test_code']);
@@ -76,6 +96,9 @@ class _TestManagementScreenState extends State<TestManagementScreen> {
     );
     final tubeTypeController = TextEditingController(text: test?['tube_type']);
     final reagentController = TextEditingController(text: test?['reagent']);
+    final sampleTypeController = TextEditingController(
+      text: test?['sample_type'],
+    );
     String? selectedDevice = test?['device_id'];
 
     await showDialog(
@@ -145,7 +168,14 @@ class _TestManagementScreenState extends State<TestManagementScreen> {
                   prefixIcon: Icons.liquor,
                 ),
                 const SizedBox(height: 16),
+                CustomTextField(
+                  controller: sampleTypeController,
+                  label: 'Sample Type (e.g., Blood, Urine)',
+                  prefixIcon: Icons.bloodtype,
+                ),
+                const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
+                  isExpanded: true,
                   initialValue: selectedDevice,
                   decoration: InputDecoration(
                     labelText: 'Device (Optional)',
@@ -162,7 +192,10 @@ class _TestManagementScreenState extends State<TestManagementScreen> {
                     ..._devices.map(
                       (device) => DropdownMenuItem<String>(
                         value: device['_id'] as String,
-                        child: Text(device['name'] as String),
+                        child: Text(
+                          device['name'] as String,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ),
                   ],
@@ -205,6 +238,9 @@ class _TestManagementScreenState extends State<TestManagementScreen> {
                     'reference_range': referenceRangeController.text,
                     'tube_type': tubeTypeController.text,
                     'reagent': reagentController.text,
+                    'sample_type': sampleTypeController.text.isNotEmpty
+                        ? sampleTypeController.text
+                        : 'Blood',
                     if (selectedDevice != null) 'device_id': selectedDevice,
                   };
 
@@ -216,9 +252,9 @@ class _TestManagementScreenState extends State<TestManagementScreen> {
                   LoadingDialog.hide(context);
 
                   if (response['message'] != null) {
-                    if (!context.mounted) return;
                     Navigator.pop(context);
                     _loadData();
+                    if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
@@ -280,6 +316,412 @@ class _TestManagementScreenState extends State<TestManagementScreen> {
     }
   }
 
+  Future<void> _showComponentsDialog(Map<String, dynamic> test) async {
+    // Load components for this test
+    List<Map<String, dynamic>> components = [];
+    bool isLoading = true;
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          if (isLoading) {
+            OwnerApiService.getTestComponents(test['_id'])
+                .then((response) {
+                  if (response['components'] != null) {
+                    setDialogState(() {
+                      components = List<Map<String, dynamic>>.from(
+                        response['components'],
+                      );
+                      isLoading = false;
+                    });
+                  }
+                })
+                .catchError((e) {
+                  setDialogState(() => isLoading = false);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error loading components: $e')),
+                    );
+                  }
+                });
+          }
+
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(Icons.view_list, color: Colors.green),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Test Components',
+                        style: const TextStyle(fontSize: 18),
+                      ),
+                      Text(
+                        test['test_name'],
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.normal,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 400,
+              child: isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : components.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.science_outlined,
+                            size: 64,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'No components yet',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Add components for multi-parameter tests',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: components.length,
+                      itemBuilder: (context, index) {
+                        final component = components[index];
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: Colors.green[100],
+                              child: Text(
+                                '${index + 1}',
+                                style: TextStyle(
+                                  color: Colors.green[800],
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            title: Text(
+                              component['component_name'] ?? '',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Code: ${component['component_code'] ?? 'N/A'}',
+                                ),
+                                Text('Units: ${component['units'] ?? 'N/A'}'),
+                                Text(
+                                  'Range: ${component['reference_range'] ?? 'N/A'}',
+                                  style: TextStyle(
+                                    color: Colors.green[700],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.edit,
+                                    color: Colors.blue,
+                                    size: 20,
+                                  ),
+                                  onPressed: () {
+                                    Navigator.pop(dialogContext);
+                                    _showComponentFormDialog(
+                                      test,
+                                      component,
+                                    ).then((_) => _showComponentsDialog(test));
+                                  },
+                                  tooltip: 'Edit Component',
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.delete,
+                                    color: Colors.red,
+                                    size: 20,
+                                  ),
+                                  onPressed: () =>
+                                      _deleteComponent(
+                                        test['_id'],
+                                        component['_id'],
+                                      ).then((_) {
+                                        setDialogState(() {
+                                          components.removeAt(index);
+                                        });
+                                      }),
+                                  tooltip: 'Delete Component',
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Close'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  _showComponentFormDialog(
+                    test,
+                  ).then((_) => _showComponentsDialog(test));
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Add Component'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showComponentFormDialog(
+    Map<String, dynamic> test, [
+    Map<String, dynamic>? component,
+  ]) async {
+    final nameController = TextEditingController(
+      text: component?['component_name'],
+    );
+    final codeController = TextEditingController(
+      text: component?['component_code'],
+    );
+    final unitsController = TextEditingController(text: component?['units']);
+    final rangeController = TextEditingController(
+      text: component?['reference_range'],
+    );
+    final minController = TextEditingController(
+      text: component?['min_value']?.toString(),
+    );
+    final maxController = TextEditingController(
+      text: component?['max_value']?.toString(),
+    );
+    final orderController = TextEditingController(
+      text: component?['display_order']?.toString(),
+    );
+    final descController = TextEditingController(
+      text: component?['description'],
+    );
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(component == null ? 'Add Component' : 'Edit Component'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CustomTextField(
+                controller: nameController,
+                label: 'Component Name *',
+                prefixIcon: Icons.science,
+              ),
+              const SizedBox(height: 16),
+              CustomTextField(
+                controller: codeController,
+                label: 'Component Code *',
+                prefixIcon: Icons.code,
+              ),
+              const SizedBox(height: 16),
+              CustomTextField(
+                controller: unitsController,
+                label: 'Units (e.g., mg/dL, 10^3/μL)',
+                prefixIcon: Icons.straighten,
+              ),
+              const SizedBox(height: 16),
+              CustomTextField(
+                controller: rangeController,
+                label: 'Reference Range (e.g., 4.5-11.0)',
+                prefixIcon: Icons.assessment,
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: CustomTextField(
+                      controller: minController,
+                      label: 'Min Value',
+                      prefixIcon: Icons.arrow_downward,
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: CustomTextField(
+                      controller: maxController,
+                      label: 'Max Value',
+                      prefixIcon: Icons.arrow_upward,
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              CustomTextField(
+                controller: orderController,
+                label: 'Display Order',
+                prefixIcon: Icons.format_list_numbered,
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+              CustomTextField(
+                controller: descController,
+                label: 'Description (Optional)',
+                prefixIcon: Icons.description,
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (nameController.text.isEmpty || codeController.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Component name and code are required'),
+                  ),
+                );
+                return;
+              }
+
+              LoadingDialog.show(context);
+              try {
+                final data = {
+                  'component_name': nameController.text,
+                  'component_code': codeController.text,
+                  if (unitsController.text.isNotEmpty)
+                    'units': unitsController.text,
+                  if (rangeController.text.isNotEmpty)
+                    'reference_range': rangeController.text,
+                  if (minController.text.isNotEmpty)
+                    'min_value': double.tryParse(minController.text),
+                  if (maxController.text.isNotEmpty)
+                    'max_value': double.tryParse(maxController.text),
+                  if (orderController.text.isNotEmpty)
+                    'display_order': int.tryParse(orderController.text),
+                  if (descController.text.isNotEmpty)
+                    'description': descController.text,
+                };
+
+                final response = component == null
+                    ? await OwnerApiService.addTestComponent(test['_id'], data)
+                    : await OwnerApiService.updateTestComponent(
+                        test['_id'],
+                        component['_id'],
+                        data,
+                      );
+
+                if (!context.mounted) return;
+                LoadingDialog.hide(context);
+
+                if (response['message'] != null ||
+                    response['component'] != null) {
+                  Navigator.pop(context);
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        component == null
+                            ? 'Component added successfully'
+                            : 'Component updated successfully',
+                      ),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (!context.mounted) return;
+                LoadingDialog.hide(context);
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Error: $e')));
+              }
+            },
+            child: Text(component == null ? 'Add' : 'Update'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteComponent(String testId, String componentId) async {
+    final confirm = await ConfirmationDialog.show(
+      context,
+      title: 'Delete Component',
+      message: 'Are you sure you want to delete this component?',
+      confirmText: 'Delete',
+      confirmColor: Colors.red,
+      icon: Icons.delete,
+    );
+
+    if (!confirm) return;
+
+    LoadingDialog.show(context);
+    try {
+      final response = await OwnerApiService.deleteTestComponent(
+        testId,
+        componentId,
+      );
+
+      if (!context.mounted) return;
+      LoadingDialog.hide(context);
+
+      if (response['message'] != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Component deleted successfully')),
+        );
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      LoadingDialog.hide(context);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<OwnerAuthProvider>(context);
@@ -299,6 +741,13 @@ class _TestManagementScreenState extends State<TestManagementScreen> {
           tooltip: 'Dashboard',
         ),
         title: const Text('Test Management'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.feedback),
+            onPressed: _showOwnerFeedbackDialog,
+            tooltip: 'Give Feedback',
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -347,6 +796,11 @@ class _TestManagementScreenState extends State<TestManagementScreen> {
                         )
                         .toList(),
                     actions: (row) => [
+                      IconButton(
+                        icon: const Icon(Icons.view_list, color: Colors.green),
+                        onPressed: () => _showComponentsDialog(row['_data']),
+                        tooltip: 'Manage Components',
+                      ),
                       IconButton(
                         icon: const Icon(Icons.edit, color: Colors.blue),
                         onPressed: () => _showTestDialog(row['_data']),

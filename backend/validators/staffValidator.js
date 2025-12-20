@@ -111,3 +111,11 @@ exports.validateFeedback = [
     .optional()
     .isBoolean().withMessage('is_anonymous must be true or false')
 ];
+
+// Assign Test to Me Validation
+exports.validateAssignTestToMe = [
+  body('detail_id')
+    .trim()
+    .notEmpty().withMessage('Detail ID is required')
+    .isMongoId().withMessage('Invalid detail ID format')
+];

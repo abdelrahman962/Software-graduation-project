@@ -1,26 +1,43 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'api_service.dart';
 
 class AdminService {
-  static const String baseUrl = 'http://localhost:5000/api';
+  // Profile
+  static Future<Map<String, dynamic>> getProfile() async {
+    return await ApiService.get('/admin/profile');
+  }
+
+  static Future<Map<String, dynamic>> updateProfile(
+    Map<String, dynamic> profileData,
+  ) async {
+    return await ApiService.put('/admin/profile', profileData);
+  }
 
   // Get admin contact information for landing page
   static Future<Map<String, dynamic>> getContactInfo() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/admin/contact-info'));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return {'success': true, 'contact': data['contact'] ?? {}};
-      } else {
-        final error = jsonDecode(response.body);
-        return {
-          'success': false,
-          'message': error['message'] ?? 'Failed to load contact information',
-        };
-      }
+      final response = await ApiService.get('/admin/contact-info');
+      return {'success': true, 'contact': response['contact'] ?? {}};
     } catch (e) {
       return {'success': false, 'message': 'Network error: ${e.toString()}'};
+    }
+  }
+
+  // Reply to owner notification (with WhatsApp)
+  static Future<Map<String, dynamic>> replyToOwnerNotification(
+    String notificationId,
+    String message,
+  ) async {
+    try {
+      final response = await ApiService.post(
+        '/admin/notifications/$notificationId/reply',
+        {'message': message},
+      );
+      return {'success': true, 'data': response};
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'Failed to send reply: ${e.toString()}',
+      };
     }
   }
 }

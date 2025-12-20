@@ -20,6 +20,7 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen> {
   List<Map<String, dynamic>> _inventoryItems = [];
   bool _isLoading = true;
   String? _error;
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -125,7 +126,15 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen> {
   }
 
   List<Map<String, dynamic>> get _filteredItems {
-    return _inventoryItems;
+    if (_searchQuery.isEmpty) {
+      return _inventoryItems;
+    }
+    return _inventoryItems.where((item) {
+      final name = (item['name'] as String? ?? '').toLowerCase();
+      final itemCode = (item['item_code'] as String? ?? '').toLowerCase();
+      final query = _searchQuery.toLowerCase();
+      return name.contains(query) || itemCode.contains(query);
+    }).toList();
   }
 
   @override
@@ -185,6 +194,31 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen> {
                     // Search and Add Button Row
                     Row(
                       children: [
+                        Expanded(
+                          child: TextField(
+                            decoration: InputDecoration(
+                              hintText: 'Search by item name or code...',
+                              prefixIcon: const Icon(Icons.search),
+                              suffixIcon: _searchQuery.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear),
+                                      onPressed: () {
+                                        setState(() => _searchQuery = '');
+                                      },
+                                    )
+                                  : null,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              filled: true,
+                              fillColor: Colors.white,
+                            ),
+                            onChanged: (value) {
+                              setState(() => _searchQuery = value);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
                         ElevatedButton.icon(
                           onPressed: _addInventoryItem,
                           icon: const Icon(Icons.add),
@@ -200,6 +234,16 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen> {
                         ),
                       ],
                     ),
+                    if (_searchQuery.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Found ${_filteredItems.length} item${_filteredItems.length != 1 ? 's' : ''}',
+                        style: TextStyle(
+                          color: AppTheme.primaryBlue,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 24),
 
                     // Content

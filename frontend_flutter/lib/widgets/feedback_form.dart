@@ -66,7 +66,7 @@ class _FeedbackFormState extends State<FeedbackForm> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Thank you for your feedback!')),
         );
-        Navigator.of(context).pop();
+        // Removed Navigator.of(context).pop() to avoid double pop error
       }
     } catch (e) {
       if (mounted) {

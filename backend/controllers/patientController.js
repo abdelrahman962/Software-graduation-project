@@ -6,6 +6,7 @@ const Test = require('../models/Test');
 const Notification = require('../models/Notification');
 const Invoice = require('../models/Invoices');
 const Feedback = require('../models/Feedback');
+const LabOwner = require('../models/Owner');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const sendEmail = require('../utils/sendEmail');
@@ -263,8 +264,22 @@ exports.getOrderById = async (req, res, next) => {
       .populate('test_id', 'test_name test_code price sample_type')
       .populate('staff_id', 'full_name');
 
-    // Get invoice
-    const invoice = await Invoice.findOne({ order_id: order._id });
+    // Get invoice - try multiple ways to find it
+    let invoice = await Invoice.findOne({ order_id: order._id });
+    console.log(`Looking for invoice for order ${order._id}, found:`, invoice ? invoice._id : 'null');
+    
+    // If not found, try with string comparison
+    if (!invoice) {
+      invoice = await Invoice.findOne({ order_id: order._id.toString() });
+      console.log(`String comparison for order ${order._id}, found:`, invoice ? invoice._id : 'null');
+    }
+    
+    // If still not found, try finding any invoice for this patient that might be related
+    if (!invoice) {
+      const allInvoices = await Invoice.find({}).populate('order_id');
+      invoice = allInvoices.find(inv => inv.order_id && inv.order_id._id.toString() === order._id.toString());
+      console.log(`Manual search for order ${order._id}, found:`, invoice ? invoice._id : 'null');
+    }
 
     res.json({
       order,
@@ -352,8 +367,28 @@ exports.requestTests = async (req, res, next) => {
       subtotal,
       discount: 0,
       total_amount: subtotal,
-      payment_status: 'pending',
-      owner_id
+      payment_status: 'paid', // Mark as paid initially
+      payment_method: 'cash', // Default payment method
+      payment_date: new Date(),
+      paid_by: req.user._id,
+      owner_id,
+      items: tests.map(t => ({
+        test_id: t._id,
+        test_name: t.test_name,
+        price: t.price,
+        quantity: 1
+      }))
+    }], { session });
+
+    // Send invoice notification to patient
+    await Notification.create([{
+      sender_id: req.user._id,
+      sender_model: 'Patient',
+      receiver_id: req.user._id,
+      receiver_model: 'Patient',
+      type: 'invoice',
+      title: 'Invoice Generated',
+      message: `Your invoice for order has been generated. Total: ${subtotal} ILS. Payment status: Paid.`
     }], { session });
 
     // Send notification to lab owner (within transaction)
@@ -483,7 +518,7 @@ exports.getOrdersWithResults = async (req, res, next) => {
           barcode: order.barcode,
           order_date: order.order_date,
           doctor_name: doctorName,
-          total_tests: details.length,
+          test_count: details.length,
           completed_tests: completedCount,
           in_progress_tests: inProgressCount,
           pending_tests: pendingCount,
@@ -530,11 +565,33 @@ exports.getOrderResults = async (req, res, next) => {
       .map(d => d._id);
     const results = await Result.find({ detail_id: { $in: detailIds } });
 
-    // Combine details with results
+    // Get components for tests that have them
+    const resultsWithComponents = results.filter(r => r.has_components);
+    const resultIds = resultsWithComponents.map(r => r._id);
+    const ResultComponent = require('../models/ResultComponent');
+    const components = await ResultComponent.find({ result_id: { $in: resultIds } })
+      .populate('component_id')
+      .sort({ 'component_id.display_order': 1 });
+
+    // Combine details with results and components
     const resultsWithDetails = details.map(detail => {
       const result = detail.status === 'completed' 
         ? results.find(r => r.detail_id.toString() === detail._id.toString())
         : null;
+      
+      let componentsForTest = [];
+      if (result && result.has_components) {
+        componentsForTest = components
+          .filter(c => c.result_id.toString() === result._id.toString())
+          .map(c => ({
+            component_name: c.component_name,
+            component_value: c.component_value,
+            units: c.units,
+            reference_range: c.reference_range,
+            is_abnormal: c.is_abnormal,
+            remarks: c.remarks
+          }));
+      }
       
       return {
         detail_id: detail._id,
@@ -547,7 +604,9 @@ exports.getOrderResults = async (req, res, next) => {
         remarks: result?.remarks || null,
         createdAt: result?.createdAt || detail.createdAt,
         staff: detail.staff_id,
-        result: result || null
+        result: result || null,
+        has_components: result?.has_components || false,
+        components: componentsForTest
       };
     });
 
@@ -589,6 +648,8 @@ exports.getOrderResults = async (req, res, next) => {
  */
 exports.getMyResults = async (req, res, next) => {
   try {
+    const ResultComponent = require('../models/ResultComponent');
+    
     // Get all patient's orders
     const orders = await Order.find({ patient_id: req.user._id });
     const orderIds = orders.map(o => o._id);
@@ -613,6 +674,14 @@ exports.getMyResults = async (req, res, next) => {
     const results = await Result.find({ detail_id: { $in: detailIds } })
       .populate('detail_id');
 
+    // Get all result IDs for component lookup
+    const resultIds = results.map(r => r._id);
+    const componentCounts = await ResultComponent.aggregate([
+      { $match: { result_id: { $in: resultIds } } },
+      { $group: { _id: '$result_id', count: { $sum: 1 }, abnormalCount: { $sum: { $cond: ['$is_abnormal', 1, 0] } } } }
+    ]);
+    const componentCountMap = new Map(componentCounts.map(c => [c._id.toString(), c]));
+
     // Combine details with results
     const resultsWithDetails = activeDetails.map(detail => {
       const result = detail.status === 'completed' 
@@ -624,6 +693,8 @@ exports.getMyResults = async (req, res, next) => {
         ? `Dr. ${detail.order_id.doctor_id.name.first} ${detail.order_id.doctor_id.name.middle || ''} ${detail.order_id.doctor_id.name.last}`.trim()
         : null;
       
+      const componentInfo = result ? componentCountMap.get(result._id.toString()) : null;
+      
       return {
         order_id: detail.order_id._id,
         order_barcode: detail.order_id.barcode,
@@ -631,7 +702,10 @@ exports.getMyResults = async (req, res, next) => {
         doctor_name: doctorName,
         test_name: detail.test_id?.test_name || 'Unknown Test',
         test_code: detail.test_id?.test_code || 'N/A',
-        status: detail.status, // Add status field
+        status: detail.status,
+        has_components: result?.has_components || false,
+        component_count: componentInfo?.count || 0,
+        abnormal_component_count: componentInfo?.abnormalCount || 0,
         test_result: result?.result_value || (detail.status === 'in_progress' ? 'In Progress' : 'N/A'),
         units: result?.units || detail.test_id?.units || 'N/A',
         reference_range: detail.test_id?.reference_range || 'N/A',
@@ -677,11 +751,28 @@ exports.getResultById = async (req, res, next) => {
       return res.status(404).json({ message: '❌ Result not available yet' });
     }
 
+    // If result has components, fetch them
+    let components = [];
+    if (result.has_components) {
+      const ResultComponent = require('../models/ResultComponent');
+      components = await ResultComponent.find({ result_id: result._id })
+        .populate('component_id')
+        .sort({ 'component_id.display_order': 1 });
+    }
+
     res.json({
       order: detail.order_id,
       test: detail.test_id,
       staff: detail.staff_id,
-      result
+      result,
+      components: components.map(c => ({
+        component_name: c.component_name,
+        component_value: c.component_value,
+        units: c.units,
+        reference_range: c.reference_range,
+        is_abnormal: c.is_abnormal,
+        remarks: c.remarks
+      }))
     });
   } catch (err) {
     next(err);
@@ -882,11 +973,22 @@ exports.getMyInvoices = async (req, res, next) => {
     }
 
     const invoices = await Invoice.find(query)
-      .populate('order_id')
-      .populate('owner_id', 'name')
+      .populate({
+        path: 'order_id',
+        populate: { path: 'owner_id', select: 'name address phone_number' }
+      })
       .sort({ invoice_date: -1 });
 
-    res.json({ count: invoices.length, invoices });
+    // Add test_count to each invoice's order
+    const invoicesWithTestCount = await Promise.all(
+      invoices.map(async (invoice) => {
+        const details = await OrderDetails.find({ order_id: invoice.order_id._id });
+        invoice.order_id.test_count = details.length;
+        return invoice;
+      })
+    );
+
+    res.json({ count: invoicesWithTestCount.length, invoices: invoicesWithTestCount });
   } catch (err) {
     next(err);
   }
@@ -1119,9 +1221,9 @@ exports.provideFeedback = async (req, res, next) => {
     }
 
     // Validate target_type
-    const validTargetTypes = ['lab', 'test', 'order', 'system'];
+    const validTargetTypes = ['lab', 'test', 'order', 'system', 'service'];
     if (!validTargetTypes.includes(target_type)) {
-      return res.status(400).json({ message: '⚠️ Invalid target type. Must be lab, test, order, or system' });
+      return res.status(400).json({ message: '⚠️ Invalid target type. Must be lab, test, order, system, or service' });
     }
 
     // For non-system feedback, target_id is required
@@ -1172,12 +1274,43 @@ exports.provideFeedback = async (req, res, next) => {
       }
     }
 
+    // Check for 28-day cooldown (users can submit feedback every 4 weeks)
+    const twentyEightDaysAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
+    const lastFeedback = await Feedback.findOne({
+      user_id: req.user._id,
+      createdAt: { $gte: twentyEightDaysAgo }
+    }).sort({ createdAt: -1 });
+
+    if (lastFeedback) {
+      const daysUntilNext = Math.ceil((lastFeedback.createdAt.getTime() + 28 * 24 * 60 * 60 * 1000 - Date.now()) / (24 * 60 * 60 * 1000));
+      return res.status(429).json({
+        message: `⏳ You can submit feedback again in ${daysUntilNext} days. Feedback is limited to once every 4 weeks.`
+      });
+    }
+
+    // Determine target model for refPath
+    let target_model = null;
+    if (!['system', 'service'].includes(target_type)) {
+      switch (target_type) {
+        case 'lab':
+          target_model = 'Owner';
+          break;
+        case 'test':
+          target_model = 'Test';
+          break;
+        case 'order':
+          target_model = 'Order';
+          break;
+      }
+    }
+
     // Create feedback
     const feedback = new Feedback({
       user_id: req.user._id,
       user_model: 'Patient',
       target_type,
       target_id: target_type === 'system' ? null : target_id,
+      target_model,
       rating,
       message: message || '',
       is_anonymous: is_anonymous || false
@@ -1234,16 +1367,7 @@ exports.getMyFeedback = async (req, res, next) => {
     const feedback = await Feedback.find(query)
       .populate({
         path: 'target_id',
-        select: 'name lab_name test_name barcode',
-        model: function(doc) {
-          switch (doc.target_type) {
-            case 'lab': return 'Owner';
-            case 'test': return 'Test';
-            case 'order': return 'Order';
-            case 'system': return null; // System feedback has no specific target
-            default: return null;
-          }
-        }
+        select: 'name lab_name test_name barcode'
       })
       .sort({ createdAt: -1 })
       .limit(limit * 1)

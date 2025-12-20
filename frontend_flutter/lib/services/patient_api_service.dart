@@ -17,6 +17,12 @@ class PatientApiService {
     return await ApiService.get('/patient/profile');
   }
 
+  static Future<Map<String, dynamic>> updateProfile(
+    Map<String, dynamic> profileData,
+  ) async {
+    return await ApiService.put('/patient/profile', profileData);
+  }
+
   // Dashboard
   static Future<Map<String, dynamic>> getDashboard() async {
     return await ApiService.get('/patient/dashboard');
@@ -91,5 +97,25 @@ class PatientApiService {
         .join('&');
 
     return await ApiService.get('/patient/feedback?$queryString');
+  }
+
+  // Invoices/Billing
+  static Future<Map<String, dynamic>> getMyInvoices({
+    String? paymentStatus,
+  }) async {
+    final queryParams = <String, String>{};
+    if (paymentStatus != null) {
+      queryParams['payment_status'] = paymentStatus;
+    }
+
+    final queryString = queryParams.isNotEmpty
+        ? '?${queryParams.entries.map((e) => '${e.key}=${e.value}').join('&')}'
+        : '';
+
+    return await ApiService.get('/patient/invoices$queryString');
+  }
+
+  static Future<Map<String, dynamic>> getInvoiceById(String invoiceId) async {
+    return await ApiService.get('/patient/invoices/$invoiceId');
   }
 }

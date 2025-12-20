@@ -7,6 +7,7 @@ import '../../providers/patient_auth_provider.dart';
 import '../../services/patient_api_service.dart';
 import '../../config/theme.dart';
 import '../../widgets/animations.dart';
+import '../../utils/responsive_utils.dart';
 
 class PatientOrderReportScreen extends StatefulWidget {
   final String orderId;
@@ -23,6 +24,8 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
   Map<String, dynamic>? _orderInfo;
   bool _isLoading = true;
   String? _error;
+  bool _hasAbnormalResults = false;
+  int _abnormalCount = 0;
 
   @override
   void initState() {
@@ -44,6 +47,33 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
           _results = response['results'] ?? [];
           _orderInfo = response['order'];
           _isLoading = false;
+
+          // Check for abnormal results
+          _hasAbnormalResults = false;
+          _abnormalCount = 0;
+
+          for (final result in _results) {
+            final hasComponents = result['has_components'] == true;
+            if (hasComponents) {
+              final components = result['components'] as List<dynamic>? ?? [];
+              for (final component in components) {
+                if (component['is_abnormal'] == true) {
+                  _hasAbnormalResults = true;
+                  _abnormalCount++;
+                }
+              }
+            } else {
+              // For single-value tests, check if result indicates abnormality
+              final resultValue = result['test_result']?.toString() ?? '';
+              if (resultValue.contains('High') ||
+                  resultValue.contains('Low') ||
+                  resultValue.contains('Abnormal') ||
+                  result['status'] == 'urgent') {
+                _hasAbnormalResults = true;
+                _abnormalCount++;
+              }
+            }
+          }
         });
       }
     } catch (e) {
@@ -172,7 +202,11 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
 
     return AppAnimations.pageDepthTransition(
       SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: ResponsiveUtils.getResponsivePadding(
+          context,
+          horizontal: 16,
+          vertical: 16,
+        ),
         child: Column(
           children: [
             Container(
@@ -196,7 +230,11 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                 children: [
                   // Header Section
                   Container(
-                    padding: const EdgeInsets.all(16),
+                    padding: ResponsiveUtils.getResponsivePadding(
+                      context,
+                      horizontal: 16,
+                      vertical: 16,
+                    ),
                     decoration: BoxDecoration(
                       color: AppTheme.primaryBlue.withValues(alpha: 0.1),
                       borderRadius: const BorderRadius.only(
@@ -209,14 +247,22 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                         Icon(
                           Icons.local_hospital,
                           color: AppTheme.primaryBlue,
-                          size: 28,
+                          size: ResponsiveUtils.getResponsiveIconSize(
+                            context,
+                            28,
+                          ),
                         ),
-                        const SizedBox(width: 12),
+                        SizedBox(
+                          width: ResponsiveUtils.getResponsiveSpacing(
+                            context,
+                            12,
+                          ),
+                        ),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
+                              ResponsiveText(
                                 _orderInfo?['lab_name'] ?? 'Medical Laboratory',
                                 style: AppTheme.medicalTextStyle(
                                   fontSize: 18,
@@ -297,6 +343,55 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                       ],
                     ),
                   ),
+
+                  // Abnormal Results Warning Banner
+                  if (_hasAbnormalResults)
+                    Container(
+                      margin: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.1),
+                        border: Border.all(
+                          color: Colors.red.withValues(alpha: 0.3),
+                          width: 2,
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            color: Colors.red[700],
+                            size: 28,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '🚨 CRITICAL: Abnormal Results Detected',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.red[900],
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '$_abnormalCount abnormal value(s) found. Please contact your healthcare provider immediately for interpretation and next steps.',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.red[800],
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
 
                   // Patient Information Section
                   Container(
@@ -503,13 +598,30 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
 
                               // Table Rows
                               ..._results.map((result) {
-                                return _buildResultRow(
-                                  result['test_name'] ?? 'Unknown Test',
-                                  result['test_result']?.toString() ?? 'N/A',
-                                  result['reference_range'] ?? 'N/A',
-                                  result['units'] ?? 'N/A',
-                                  result['status'] ?? 'pending',
-                                );
+                                final hasComponents =
+                                    result['has_components'] == true;
+                                final components =
+                                    result['components'] as List<dynamic>? ??
+                                    [];
+
+                                if (hasComponents && components.isNotEmpty) {
+                                  // Multi-component test - show expandable row
+                                  return _buildExpandableResultRow(
+                                    result['test_name'] ?? 'Unknown Test',
+                                    components,
+                                    result['status'] ?? 'pending',
+                                    result['remarks'],
+                                  );
+                                } else {
+                                  // Single-value test - show simple row
+                                  return _buildResultRow(
+                                    result['test_name'] ?? 'Unknown Test',
+                                    result['test_result']?.toString() ?? 'N/A',
+                                    result['reference_range'] ?? 'N/A',
+                                    result['units'] ?? 'N/A',
+                                    result['status'] ?? 'pending',
+                                  );
+                                }
                               }),
                             ],
                           ),
@@ -745,6 +857,266 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
     );
   }
 
+  Widget _buildExpandableResultRow(
+    String testName,
+    List<dynamic> components,
+    String status,
+    String? remarks,
+  ) {
+    return ExpansionTile(
+      title: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: Text(
+                testName,
+                style: AppTheme.medicalTextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textDark,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                '${components.length} components',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textMedium,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                'Multiple',
+                textAlign: TextAlign.center,
+                style: AppTheme.medicalTextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textMedium,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 1,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _getStatusColor(status),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  status == 'completed' ? 'Done' : status.toUpperCase(),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      children: [
+        // Component header
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppTheme.primaryBlue.withValues(alpha: 0.05),
+            border: Border(
+              bottom: BorderSide(
+                color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                width: 0.5,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: Text(
+                  'Component',
+                  style: AppTheme.medicalTextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primaryBlue,
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'Result',
+                  textAlign: TextAlign.center,
+                  style: AppTheme.medicalTextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primaryBlue,
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  'Reference',
+                  textAlign: TextAlign.center,
+                  style: AppTheme.medicalTextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primaryBlue,
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: 1,
+                child: Text(
+                  'Unit',
+                  textAlign: TextAlign.center,
+                  style: AppTheme.medicalTextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primaryBlue,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Component rows
+        ...components.map((component) {
+          final isAbnormal = component['is_abnormal'] == true;
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: isAbnormal
+                  ? Colors.red.withValues(alpha: 0.08)
+                  : Colors.green.withValues(alpha: 0.03),
+              border: Border(
+                left: BorderSide(
+                  color: isAbnormal ? Colors.red[400]! : Colors.green[400]!,
+                  width: 3,
+                ),
+                bottom: BorderSide(
+                  color: Colors.grey.withValues(alpha: 0.1),
+                  width: 0.5,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: Row(
+                    children: [
+                      if (isAbnormal)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Icon(
+                            Icons.warning_amber_rounded,
+                            color: Colors.red[600],
+                            size: 14,
+                          ),
+                        ),
+                      Expanded(
+                        child: Text(
+                          component['component_name'] ?? 'Unknown',
+                          style: AppTheme.medicalTextStyle(
+                            fontSize: 12,
+                            fontWeight: isAbnormal
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: isAbnormal
+                                ? Colors.red[900]
+                                : AppTheme.textDark,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    component['component_value']?.toString() ?? 'N/A',
+                    textAlign: TextAlign.center,
+                    style: AppTheme.medicalTextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: isAbnormal ? Colors.red[700] : Colors.green[700],
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    component['reference_range'] ?? 'N/A',
+                    textAlign: TextAlign.center,
+                    style: AppTheme.medicalTextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textMedium,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 1,
+                  child: Text(
+                    component['units'] ?? 'N/A',
+                    textAlign: TextAlign.center,
+                    style: AppTheme.medicalTextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textMedium,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+
+        // Remarks for the test
+        if (remarks != null && remarks.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.orange.withValues(alpha: 0.05),
+              border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.note_alt_outlined,
+                  color: Colors.orange[700],
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    remarks,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.orange[900],
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
   String _getPatientFullName(user) {
     if (user?.fullName != null) {
       final first = user!.fullName!.first;
@@ -800,6 +1172,22 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
         )
         .map((result) => result['remarks'])
         .join('\n\n');
+
+    // Check for abnormal results
+    bool hasAbnormalResults = false;
+    int abnormalCount = 0;
+    for (final result in _results) {
+      final hasComponents = result['has_components'] == true;
+      if (hasComponents) {
+        final components = result['components'] as List<dynamic>? ?? [];
+        for (final component in components) {
+          if (component['is_abnormal'] == true) {
+            hasAbnormalResults = true;
+            abnormalCount++;
+          }
+        }
+      }
+    }
 
     pdf.addPage(
       pw.MultiPage(
@@ -873,6 +1261,44 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
             ),
             pw.SizedBox(height: 20),
 
+            // Critical Results Warning
+            if (hasAbnormalResults) ...[
+              pw.Container(
+                padding: const pw.EdgeInsets.all(16),
+                margin: const pw.EdgeInsets.only(bottom: 20),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.red50,
+                  border: pw.Border.all(color: PdfColors.red, width: 2),
+                  borderRadius: pw.BorderRadius.circular(8),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Row(
+                      children: [
+                        pw.Text(
+                          '🚨 CRITICAL RESULTS',
+                          style: pw.TextStyle(
+                            fontSize: 16,
+                            fontWeight: pw.FontWeight.bold,
+                            color: PdfColors.red900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    pw.SizedBox(height: 8),
+                    pw.Text(
+                      '$abnormalCount abnormal value(s) detected. Please contact your healthcare provider immediately for interpretation and next steps.',
+                      style: const pw.TextStyle(
+                        fontSize: 12,
+                        color: PdfColors.red800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             // Patient Information
             pw.Text(
               'Patient Information',
@@ -937,15 +1363,148 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                     _buildPdfHeaderCell('Unit'),
                   ],
                 ),
-                ..._results.map((result) {
-                  return pw.TableRow(
-                    children: [
-                      _buildPdfCell(result['test_name'] ?? 'Unknown Test'),
-                      _buildPdfCell(result['test_result']?.toString() ?? 'N/A'),
-                      _buildPdfCell(result['reference_range'] ?? 'N/A'),
-                      _buildPdfCell(result['units'] ?? 'N/A'),
-                    ],
-                  );
+                ..._results.expand((result) {
+                  final hasComponents = result['has_components'] == true;
+                  final components =
+                      result['components'] as List<dynamic>? ?? [];
+
+                  if (hasComponents && components.isNotEmpty) {
+                    // Multi-component test - create main row + component rows
+                    final rows = <pw.TableRow>[];
+
+                    // Main test row
+                    rows.add(
+                      pw.TableRow(
+                        decoration: const pw.BoxDecoration(
+                          color: PdfColors.blue50,
+                        ),
+                        children: [
+                          _buildPdfCell(
+                            '${result['test_name'] ?? 'Unknown Test'} (${components.length} components)',
+                          ),
+                          _buildPdfCell('Multiple Values'),
+                          _buildPdfCell('Component-specific'),
+                          _buildPdfCell('Various'),
+                        ],
+                      ),
+                    );
+
+                    // Component rows
+                    for (final component in components) {
+                      final isAbnormal = component['is_abnormal'] == true;
+                      rows.add(
+                        pw.TableRow(
+                          decoration: pw.BoxDecoration(
+                            color: isAbnormal
+                                ? PdfColors.red50
+                                : PdfColors.green50,
+                            border: pw.Border.all(
+                              color: isAbnormal
+                                  ? PdfColors.red200
+                                  : PdfColors.green200,
+                              width: 0.5,
+                            ),
+                          ),
+                          children: [
+                            pw.Container(
+                              padding: const pw.EdgeInsets.all(4),
+                              child: pw.Row(
+                                children: [
+                                  if (isAbnormal)
+                                    pw.Container(
+                                      margin: const pw.EdgeInsets.only(
+                                        right: 4,
+                                      ),
+                                      child: pw.Text(
+                                        '⚠️',
+                                        style: const pw.TextStyle(
+                                          fontSize: 8,
+                                          color: PdfColors.red,
+                                        ),
+                                      ),
+                                    ),
+                                  pw.Text(
+                                    '  ↳ ${component['component_name'] ?? 'Unknown'}',
+                                    style: pw.TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: isAbnormal
+                                          ? pw.FontWeight.bold
+                                          : pw.FontWeight.normal,
+                                      color: isAbnormal
+                                          ? PdfColors.red900
+                                          : PdfColors.black,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            pw.Container(
+                              padding: const pw.EdgeInsets.all(4),
+                              child: pw.Text(
+                                component['component_value']?.toString() ??
+                                    'N/A',
+                                textAlign: pw.TextAlign.center,
+                                style: pw.TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: pw.FontWeight.bold,
+                                  color: isAbnormal
+                                      ? PdfColors.red
+                                      : PdfColors.green,
+                                ),
+                              ),
+                            ),
+                            _buildPdfCell(
+                              component['reference_range'] ?? 'N/A',
+                            ),
+                            _buildPdfCell(component['units'] ?? 'N/A'),
+                          ],
+                        ),
+                      );
+                    }
+
+                    // Add remarks row if present
+                    final remarks = result['remarks'];
+                    if (remarks != null && remarks.toString().isNotEmpty) {
+                      rows.add(
+                        pw.TableRow(
+                          decoration: const pw.BoxDecoration(
+                            color: PdfColors.orange50,
+                          ),
+                          children: [
+                            pw.Container(
+                              padding: const pw.EdgeInsets.all(4),
+                              child: pw.Text(
+                                'Remarks: $remarks',
+                                style: pw.TextStyle(
+                                  fontSize: 9,
+                                  fontStyle: pw.FontStyle.italic,
+                                ),
+                              ),
+                            ),
+                            _buildPdfCell(''),
+                            _buildPdfCell(''),
+                            _buildPdfCell(''),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return rows;
+                  } else {
+                    // Single-value test - simple row
+                    return [
+                      pw.TableRow(
+                        children: [
+                          _buildPdfCell(result['test_name'] ?? 'Unknown Test'),
+                          _buildPdfCell(
+                            result['test_result']?.toString() ?? 'N/A',
+                          ),
+                          _buildPdfCell(result['reference_range'] ?? 'N/A'),
+                          _buildPdfCell(result['units'] ?? 'N/A'),
+                        ],
+                      ),
+                    ];
+                  }
                 }),
               ],
             ),

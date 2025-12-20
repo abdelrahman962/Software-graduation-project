@@ -18,15 +18,20 @@ const LabOwner = require('../models/Owner');
 const Staff = require('../models/Staff');
 const Patient = require('../models/Patient');
 const Device = require('../models/Device');
+const Admin = require('../models/Admin');
 const Test = require('../models/Test');
+const TestComponent = require('../models/TestComponent');
 const Order = require('../models/Order');
 const OrderDetails = require('../models/OrderDetails');
+const Result = require('../models/Result');
 const Invoice = require('../models/Invoices');
 const Notification = require('../models/Notification');
 const AuditLog = require('../models/AuditLog');
 const Feedback = require('../models/Feedback');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { sendWhatsAppMessage } = require('../utils/sendWhatsApp');
+const mongoose = require('mongoose');
 
 // ==================== AUTHENTICATION ====================
 
@@ -135,20 +140,39 @@ exports.login = async (req, res, next) => {
  */
 exports.requestAccess = async (req, res, next) => {
   try {
-    const { first_name, middle_name, last_name, identity_number, birthday, gender, social_status, phone, address, qualification, profession_license, bank_iban, email, username, password, selected_plan } = req.body;
+    const { first_name, middle_name, last_name, identity_number, birthday, gender, social_status, phone, address, qualification, profession_license, bank_iban, email, selected_plan } = req.body;
 
-    if (!first_name || !last_name || !identity_number || !email || !username || !password)
+    if (!first_name || !last_name || !identity_number || !email)
       return res.status(400).json({ success: false, error: '⚠️ Missing required fields' });
 
-    const existingOwner = await LabOwner.findOne({ $or: [{ email }, { username }, { identity_number }] });
-    if (existingOwner) return res.status(400).json({ success: false, error: '⚠️ Lab Owner with provided email, username, or ID already exists' });
+    const existingOwner = await LabOwner.findOne({ $or: [{ email }, { identity_number }] });
+    if (existingOwner) return res.status(400).json({ success: false, error: '⚠️ Lab Owner with provided email or ID already exists' });
+
+    // Get default admin (first admin) to assign to this owner
+    const defaultAdmin = await Admin.findOne().sort({ createdAt: 1 });
+    if (!defaultAdmin) {
+      return res.status(500).json({ success: false, error: 'System not properly configured. No admin found.' });
+    }
+
+    // Parse address string into address object
+    let addressObject = {};
+    if (address && typeof address === 'string') {
+      // Parse address string like "Nablus, Rafidia, 2" into structured format
+      const addressParts = address.split(',').map(part => part.trim());
+      addressObject = {
+        street: addressParts[2] || addressParts[0] || '', // Use last part as street, or first part if only one
+        city: addressParts[1] || addressParts[0] || '', // Use middle part as city, or first part if only one
+        country: 'Palestine' // Default country
+      };
+    } else if (address && typeof address === 'object') {
+      addressObject = address;
+    }
 
     // Set subscription fee based on selected plan
-    let subscriptionFee = 100; // Default
-    if (selected_plan === 'Professional') subscriptionFee = 200;
-    else if (selected_plan === 'Enterprise') subscriptionFee = 400;
+    let subscriptionFee = 50; // Default starter plan
+    if (selected_plan === 'professional') subscriptionFee = 100;
+    else if (selected_plan === 'enterprise') subscriptionFee = 200;
 
-    const hashedPassword = await bcrypt.hash(password, 10);
     const owner_id = `OWN-${Date.now()}`;
 
     const newRequest = await LabOwner.create({
@@ -158,17 +182,15 @@ exports.requestAccess = async (req, res, next) => {
       gender,
       social_status,
       phone_number: phone,
-      address,
+      address: addressObject,
       qualification,
       profession_license,
       bank_iban,
       email,
-      username,
-      password: hashedPassword,
       owner_id,
       date_subscription: null,
       status: 'pending',
-      admin_id: null,
+      admin_id: defaultAdmin._id,
       is_active: false,
       subscriptionFee
     });
@@ -264,11 +286,34 @@ exports.getProfile = async (req, res, next) => {
  */
 exports.updateProfile = async (req, res, next) => {
   try {
-    const { phone_number, address, email, bank_iban } = req.body;
+    const { phone_number, address, email, bank_iban, username } = req.body;
 
     const owner = await LabOwner.findById(req.user._id);
     if (!owner) {
       return res.status(404).json({ message: '❌ Owner not found' });
+    }
+
+    // Check username uniqueness if being updated
+    if (username && username !== owner.username) {
+      // Validate username format
+      if (!/^[a-z0-9._-]+$/.test(username)) {
+        return res.status(400).json({ message: '❌ Username can only contain lowercase letters, numbers, dots, underscores, and hyphens' });
+      }
+
+      // Check uniqueness across all user collections
+      const existingUsers = await Promise.all([
+        mongoose.model('Patient').findOne({ username }),
+        mongoose.model('Doctor').findOne({ username }),
+        mongoose.model('Staff').findOne({ username }),
+        mongoose.model('Admin').findOne({ username }),
+        mongoose.model('LabOwner').findOne({ username, _id: { $ne: owner._id } })
+      ]);
+
+      if (existingUsers.some(user => user !== null)) {
+        return res.status(400).json({ message: '❌ Username already exists' });
+      }
+
+      owner.username = username;
     }
 
     // Update allowed fields
@@ -480,8 +525,28 @@ exports.addStaff = async (req, res, next) => {
       message: `Your account has been created. Username: ${username}. Please login and change your password.`
     });
 
+    // Send account activation notification (both WhatsApp and Email)
+    try {
+      const { sendStaffDoctorActivation } = require('../utils/sendNotification');
+      const owner = await require('../models/Owner').findById(req.user._id);
+      const notificationSuccess = await sendStaffDoctorActivation(
+        newStaff,
+        username,
+        password,
+        'Staff',
+        owner.lab_name
+      );
+
+      if (notificationSuccess) {
+        console.log(`Account activation notification sent to new staff ${newStaff.full_name.first} ${newStaff.full_name.last} via WhatsApp and Email`);
+      }
+    } catch (notificationError) {
+      console.error('Failed to send staff account activation notification:', notificationError);
+      // Continue with the response - don't fail the staff creation
+    }
+
     res.status(201).json({ 
-      message: '✅ Staff member added successfully', 
+      message: '✅ Staff member added successfully. Credentials sent via WhatsApp and email.', 
       staff: await Staff.findById(newStaff._id).select('-password')
     });
   } catch (err) {
@@ -601,7 +666,8 @@ exports.deleteStaff = async (req, res, next) => {
 exports.getAllDoctors = async (req, res, next) => {
   try {
     const Doctor = require('../models/Doctor');
-    const doctors = await Doctor.find({ owner_id: req.user._id });
+    // Doctors are global - return all doctors (not filtered by owner_id)
+    const doctors = await Doctor.find({}).select('-password');
     res.json({ count: doctors.length, doctors });
   } catch (err) {
     next(err);
@@ -616,10 +682,7 @@ exports.getAllDoctors = async (req, res, next) => {
 exports.getDoctorById = async (req, res, next) => {
   try {
     const Doctor = require('../models/Doctor');
-    const doctor = await Doctor.findOne({
-      _id: req.params.doctorId,
-      owner_id: req.user._id
-    });
+    const doctor = await Doctor.findById(req.params.doctorId).select('-password');
 
     if (!doctor) {
       return res.status(404).json({ message: '❌ Doctor not found' });
@@ -640,33 +703,47 @@ exports.addDoctor = async (req, res, next) => {
   try {
     const Doctor = require('../models/Doctor');
     const {
-      name,
-      phone_number,
+      full_name,
+      identity_number,
+      birthday,
+      gender,
+      phone,
       email,
-      specialty,
-      license_number,
-      address
+      username,
+      password
     } = req.body;
 
     // Validate required fields
-    if (!name || !email) {
-      return res.status(400).json({ message: '⚠️ Doctor name and email are required' });
+    if (!full_name?.first || !full_name?.last || !email || !username || !identity_number || !birthday || !gender) {
+      return res.status(400).json({ message: '⚠️ Required fields: first name, last name, email, username, identity number, birthday, and gender' });
     }
 
     // Check if email already exists
-    const existingDoctor = await Doctor.findOne({ email, owner_id: req.user._id });
+    const existingDoctor = await Doctor.findOne({ email });
     if (existingDoctor) {
-      return res.status(400).json({ message: '⚠️ Doctor with this email already exists in your lab' });
+      return res.status(400).json({ message: '⚠️ Doctor with this email already exists' });
     }
 
+    // Check if identity_number already exists
+    const existingIdentity = await Doctor.findOne({ identity_number });
+    if (existingIdentity) {
+      return res.status(400).json({ message: '⚠️ Doctor with this identity number already exists' });
+    }
+
+    // Generate unique doctor_id
+    const lastDoctor = await Doctor.findOne().sort({ doctor_id: -1 });
+    const doctor_id = lastDoctor ? lastDoctor.doctor_id + 1 : 1;
+
     const newDoctor = new Doctor({
-      name,
-      phone_number,
+      doctor_id,
+      name: full_name,
+      identity_number,
+      birthday: new Date(birthday),
+      gender,
+      phone_number: phone,
       email,
-      specialty,
-      license_number,
-      address,
-      owner_id: req.user._id
+      username,
+      password: password || 'Doctor@123' // Default password if not provided
     });
 
     await newDoctor.save();
@@ -680,8 +757,28 @@ exports.addDoctor = async (req, res, next) => {
       owner_id: req.user._id
     });
 
+    // Send account activation notification (both WhatsApp and Email)
+    try {
+      const { sendStaffDoctorActivation } = require('../utils/sendNotification');
+      const owner = await require('../models/Owner').findById(req.user._id);
+      const notificationSuccess = await sendStaffDoctorActivation(
+        newDoctor,
+        username,
+        password || 'Doctor@123',
+        'Doctor',
+        owner.lab_name
+      );
+
+      if (notificationSuccess) {
+        console.log(`Account activation notification sent to new doctor ${newDoctor.name.first} ${newDoctor.name.last} via WhatsApp and Email`);
+      }
+    } catch (notificationError) {
+      console.error('Failed to send doctor account activation notification:', notificationError);
+      // Continue with the response - don't fail the doctor creation
+    }
+
     res.status(201).json({ 
-      message: '✅ Doctor added successfully', 
+      message: '✅ Doctor added successfully. Credentials sent via WhatsApp and email.', 
       doctor: newDoctor
     });
   } catch (err) {
@@ -697,10 +794,7 @@ exports.addDoctor = async (req, res, next) => {
 exports.updateDoctor = async (req, res, next) => {
   try {
     const Doctor = require('../models/Doctor');
-    const doctor = await Doctor.findOne({ 
-      _id: req.params.doctorId, 
-      owner_id: req.user._id 
-    });
+    const doctor = await Doctor.findById(req.params.doctorId);
 
     if (!doctor) {
       return res.status(404).json({ message: '❌ Doctor not found' });
@@ -710,18 +804,20 @@ exports.updateDoctor = async (req, res, next) => {
       name,
       phone_number,
       email,
-      specialty,
-      license_number,
-      address
+      identity_number,
+      birthday,
+      gender,
+      username
     } = req.body;
 
     // Update fields
     if (name) doctor.name = name;
     if (phone_number) doctor.phone_number = phone_number;
     if (email) doctor.email = email;
-    if (specialty) doctor.specialty = specialty;
-    if (license_number) doctor.license_number = license_number;
-    if (address) doctor.address = address;
+    if (identity_number) doctor.identity_number = identity_number;
+    if (birthday) doctor.birthday = new Date(birthday);
+    if (gender) doctor.gender = gender;
+    if (username) doctor.username = username;
 
     await doctor.save();
 
@@ -751,10 +847,7 @@ exports.updateDoctor = async (req, res, next) => {
 exports.deleteDoctor = async (req, res, next) => {
   try {
     const Doctor = require('../models/Doctor');
-    const doctor = await Doctor.findOne({ 
-      _id: req.params.doctorId, 
-      owner_id: req.user._id 
-    });
+    const doctor = await Doctor.findById(req.params.doctorId);
 
     if (!doctor) {
       return res.status(404).json({ message: '❌ Doctor not found' });
@@ -1131,6 +1224,7 @@ exports.addTest = async (req, res, next) => {
     const {
       test_code,
       test_name,
+      sample_type,
       tube_type,
       is_active,
       device_id,
@@ -1787,17 +1881,45 @@ exports.getAllOrders = async (req, res, next) => {
       return order.patient_id || order.temp_patient_info?.full_name;
     });
 
-    // Enrich orders with test details
-    const enrichedOrders = await Promise.all(validOrders.map(async (order) => {
-      const orderDetails = await OrderDetails.find({ order_id: order._id })
-        .populate('test_id', 'test_name test_code price')
-        .populate('staff_id', 'full_name employee_number')
-        .select('test_id staff_id status');
-      
+    // OPTIMIZED: Fetch all order details and results in bulk (avoid N+1 queries)
+    const orderIds = validOrders.map(o => o._id);
+    
+    // First, get all order details
+    const allOrderDetails = await OrderDetails.find({ order_id: { $in: orderIds } })
+      .populate('test_id', 'test_name test_code price')
+      .populate('staff_id', 'full_name employee_number')
+      .select('order_id test_id staff_id status')
+      .lean();
+    
+    // Get all detail IDs
+    const detailIds = allOrderDetails.map(d => d._id);
+    
+    // Get all results for these details
+    const allResults = await Result.find({ detail_id: { $in: detailIds } }).lean();
+
+    // Group order details by order_id for fast lookup
+    const orderDetailsMap = {};
+    allOrderDetails.forEach(detail => {
+      const orderId = detail.order_id.toString();
+      if (!orderDetailsMap[orderId]) {
+        orderDetailsMap[orderId] = [];
+      }
+      orderDetailsMap[orderId].push(detail);
+    });
+
+    // Group results by detail_id for fast lookup
+    const resultsMap = {};
+    allResults.forEach(result => {
+      resultsMap[result.detail_id.toString()] = result;
+    });
+
+    // Enrich orders with test details (now using in-memory data)
+    const enrichedOrders = validOrders.map(order => {
       const orderObj = order.toObject();
+      const orderId = order._id.toString();
+      const orderDetails = orderDetailsMap[orderId] || [];
       
       // Add flattened patient and doctor names for easier access
-      // Try patient_id first, then fall back to temp_patient_info
       if (order.patient_id?.full_name) {
         orderObj.patient_name = `${order.patient_id.full_name.first || ''} ${order.patient_id.full_name.middle || ''} ${order.patient_id.full_name.last || ''}`.trim();
       } else if (order.temp_patient_info?.full_name) {
@@ -1808,14 +1930,9 @@ exports.getAllOrders = async (req, res, next) => {
       
       orderObj.doctor_name = order.doctor_id?.name || '-';
       
-      // Get results for all order details
-      const detailIds = orderDetails.map(d => d._id);
-      const Result = require('../models/Result');
-      const results = await Result.find({ detail_id: { $in: detailIds } });
-      
       // Add test details with staff assignments and results
       orderObj.order_details = orderDetails.map(detail => {
-        const result = results.find(r => r.detail_id.toString() === detail._id.toString());
+        const result = resultsMap[detail._id.toString()];
         return {
           test_name: detail.test_id?.test_name || 'Unknown Test',
           test_code: detail.test_id?.test_code,
@@ -1836,7 +1953,7 @@ exports.getAllOrders = async (req, res, next) => {
       orderObj.test_count = orderDetails.length;
       
       return orderObj;
-    }));
+    });
 
     res.json({
       total: enrichedOrders.length,
@@ -2154,6 +2271,29 @@ exports.contactAdmin = async (req, res, next) => {
       message: `From Lab Owner (${owner.name.first} ${owner.name.last}): ${message}`
     });
 
+    // Send WhatsApp notification to admin
+    if (admin.phone_number) {
+      try {
+        const whatsappMessage = `📬 New Message from Lab Owner\n\n🏥 Lab: ${owner.lab_name}\n👤 Owner: ${owner.name.first} ${owner.name.last}\n📧 Email: ${owner.email}\n📱 Phone: ${owner.phone_number}\n\n📝 Subject: ${title}\n💬 Message:\n${message}\n\nPlease respond within 24 hours.`;
+
+        const whatsappSuccess = await sendWhatsAppMessage(
+          admin.phone_number,
+          whatsappMessage,
+          [],
+          false, // Don't fallback to email since notification is already created
+          '',
+          ''
+        );
+
+        if (whatsappSuccess) {
+          console.log(`WhatsApp notification sent to admin ${admin.full_name.first} for owner contact`);
+        }
+      } catch (whatsappErr) {
+        console.error('Failed to send WhatsApp notification to admin:', whatsappErr);
+        // Don't fail the request if WhatsApp fails
+      }
+    }
+
     res.status(201).json({ 
       message: '✅ Message sent to admin successfully', 
       notification 
@@ -2436,9 +2576,9 @@ exports.provideFeedback = async (req, res, next) => {
     }
 
     // Validate target_type
-    const validTargetTypes = ['lab', 'test', 'order', 'system'];
+    const validTargetTypes = ['lab', 'test', 'order', 'system', 'service'];
     if (!validTargetTypes.includes(target_type)) {
-      return res.status(400).json({ message: '⚠️ Invalid target type. Must be lab, test, order, or system' });
+      return res.status(400).json({ message: '⚠️ Invalid target type. Must be lab, test, order, system, or service' });
     }
 
     // For non-system feedback, target_id is required
@@ -2488,12 +2628,43 @@ exports.provideFeedback = async (req, res, next) => {
       }
     }
 
+    // Check for 28-day cooldown (users can submit feedback every 4 weeks)
+    const twentyEightDaysAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
+    const lastFeedback = await Feedback.findOne({
+      user_id: owner_id,
+      createdAt: { $gte: twentyEightDaysAgo }
+    }).sort({ createdAt: -1 });
+
+    if (lastFeedback) {
+      const daysUntilNext = Math.ceil((lastFeedback.createdAt.getTime() + 28 * 24 * 60 * 60 * 1000 - Date.now()) / (24 * 60 * 60 * 1000));
+      return res.status(429).json({
+        message: `⏳ You can submit feedback again in ${daysUntilNext} days. Feedback is limited to once every 4 weeks.`
+      });
+    }
+
+    // Determine target model for refPath
+    let target_model = null;
+    if (!['system', 'service'].includes(target_type)) {
+      switch (target_type) {
+        case 'lab':
+          target_model = 'Owner';
+          break;
+        case 'test':
+          target_model = 'Test';
+          break;
+        case 'order':
+          target_model = 'Order';
+          break;
+      }
+    }
+
     // Create feedback
     const feedback = new Feedback({
       user_id: owner_id,
       user_model: 'Owner',
       target_type,
       target_id: target_type === 'system' ? null : target_id,
+      target_model,
       rating,
       message: message || '',
       is_anonymous: is_anonymous || false
@@ -2551,16 +2722,7 @@ exports.getMyFeedback = async (req, res, next) => {
     const feedback = await Feedback.find(query)
       .populate({
         path: 'target_id',
-        select: 'name lab_name test_name barcode',
-        model: function(doc) {
-          switch (doc.target_type) {
-            case 'lab': return 'Owner';
-            case 'test': return 'Test';
-            case 'order': return 'Order';
-            case 'system': return null; // System feedback has no specific target
-            default: return null;
-          }
-        }
+        select: 'name lab_name test_name barcode'
       })
       .sort({ createdAt: -1 })
       .limit(limit * 1)
@@ -2577,6 +2739,403 @@ exports.getMyFeedback = async (req, res, next) => {
         total,
         pages: Math.ceil(total / limit)
       }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ==================== TEST COMPONENT MANAGEMENT ====================
+
+/**
+ * @desc    Add component to a test
+ * @route   POST /api/owner/tests/:testId/components
+ * @access  Private (Owner)
+ */
+exports.addTestComponent = async (req, res, next) => {
+  try {
+    const { testId } = req.params;
+    const ownerId = req.user._id;
+    const {
+      component_name,
+      component_code,
+      units,
+      reference_range,
+      min_value,
+      max_value,
+      display_order,
+      description
+    } = req.body;
+
+    // Verify test exists and belongs to owner
+    const test = await Test.findOne({ _id: testId, owner_id: ownerId });
+    if (!test) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Test not found or you do not have permission to modify it' 
+      });
+    }
+
+    // Create test component
+    const component = await TestComponent.create({
+      test_id: testId,
+      component_name,
+      component_code,
+      units,
+      reference_range,
+      min_value,
+      max_value,
+      display_order: display_order || 0,
+      description
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Test component added successfully',
+      component
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get all components for a test
+ * @route   GET /api/owner/tests/:testId/components
+ * @access  Private (Owner)
+ */
+exports.getTestComponents = async (req, res, next) => {
+  try {
+    const { testId } = req.params;
+    const ownerId = req.user._id;
+
+    // Verify test exists and belongs to owner
+    const test = await Test.findOne({ _id: testId, owner_id: ownerId });
+    if (!test) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Test not found or you do not have permission to view it' 
+      });
+    }
+
+    // Get all components for this test
+    const components = await TestComponent.find({ 
+      test_id: testId, 
+      is_active: true 
+    }).sort({ display_order: 1, createdAt: 1 });
+
+    res.json({
+      success: true,
+      test: {
+        _id: test._id,
+        test_name: test.test_name,
+        test_code: test.test_code
+      },
+      components,
+      count: components.length
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Update a test component
+ * @route   PUT /api/owner/tests/:testId/components/:componentId
+ * @access  Private (Owner)
+ */
+exports.updateTestComponent = async (req, res, next) => {
+  try {
+    const { testId, componentId } = req.params;
+    const ownerId = req.user._id;
+    const updateData = req.body;
+
+    // Verify test exists and belongs to owner
+    const test = await Test.findOne({ _id: testId, owner_id: ownerId });
+    if (!test) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Test not found or you do not have permission to modify it' 
+      });
+    }
+
+    // Find and update component
+    const component = await TestComponent.findOneAndUpdate(
+      { _id: componentId, test_id: testId },
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+
+    if (!component) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Test component not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Test component updated successfully',
+      component
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Delete a test component
+ * @route   DELETE /api/owner/tests/:testId/components/:componentId
+ * @access  Private (Owner)
+ */
+exports.deleteTestComponent = async (req, res, next) => {
+  try {
+    const { testId, componentId } = req.params;
+    const ownerId = req.user._id;
+
+    // Verify test exists and belongs to owner
+    const test = await Test.findOne({ _id: testId, owner_id: ownerId });
+    if (!test) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Test not found or you do not have permission to modify it' 
+      });
+    }
+
+    // Soft delete component (set is_active to false)
+    const component = await TestComponent.findOneAndUpdate(
+      { _id: componentId, test_id: testId },
+      { $set: { is_active: false } },
+      { new: true }
+    );
+
+    if (!component) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Test component not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Test component deleted successfully'
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get All Results for Owner's Lab
+ * @route   GET /api/owner/results
+ * @access  Private (Owner)
+ */
+exports.getAllResults = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 50, startDate, endDate, status, patientName, testName } = req.query;
+
+    // Build query for results through order details
+    let query = { owner_id: req.user._id };
+
+    // Filter by date range if provided
+    if (startDate || endDate) {
+      query.order_date = {};
+      if (startDate) query.order_date.$gte = new Date(startDate);
+      if (endDate) query.order_date.$lte = new Date(endDate);
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get orders with their details and results
+    const orders = await Order.find(query)
+      .populate('patient_id', 'full_name patient_id phone_number email')
+      .populate('doctor_id', 'name')
+      .sort({ order_date: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // Filter out orders where patient_id doesn't exist
+    const validOrders = orders.filter(order => order.patient_id);
+
+    if (validOrders.length === 0) {
+      return res.json({
+        total: 0,
+        page: parseInt(page),
+        totalPages: 0,
+        results: []
+      });
+    }
+
+    // Get all order details for these orders
+    const orderIds = validOrders.map(o => o._id);
+    const orderDetails = await OrderDetails.find({ order_id: { $in: orderIds } })
+      .populate('test_id', 'test_name test_code price')
+      .populate('staff_id', 'full_name employee_number')
+      .select('order_id test_id staff_id status result_id');
+
+    // Get all results for these order details
+    const detailIds = orderDetails.map(d => d._id);
+    const results = await Result.find({ detail_id: { $in: detailIds } })
+      .populate('component_id', 'component_name units reference_range')
+      .sort({ createdAt: -1 });
+
+    // Group results by order
+    const resultsByOrder = {};
+
+    for (const order of validOrders) {
+      const orderObj = order.toObject();
+      const orderDetailIds = orderDetails
+        .filter(d => d.order_id.toString() === order._id.toString())
+        .map(d => d._id);
+
+      const orderResults = results.filter(r => orderDetailIds.includes(r.detail_id));
+
+      if (orderResults.length > 0) {
+        // Apply filters
+        let filteredResults = orderResults;
+
+        if (status) {
+          filteredResults = filteredResults.filter(r => r.status === status);
+        }
+
+        if (patientName) {
+          const patientFullName = `${order.patient_id.full_name.first} ${order.patient_id.full_name.last}`.toLowerCase();
+          if (!patientFullName.includes(patientName.toLowerCase())) {
+            continue;
+          }
+        }
+
+        if (testName) {
+          filteredResults = filteredResults.filter(r => {
+            const detail = orderDetails.find(d => d._id.toString() === r.detail_id.toString());
+            return detail && detail.test_id && detail.test_id.test_name.toLowerCase().includes(testName.toLowerCase());
+          });
+        }
+
+        if (filteredResults.length > 0) {
+          resultsByOrder[order._id] = {
+            order: {
+              _id: order._id,
+              order_id: order.order_id,
+              order_date: order.order_date,
+              status: order.status,
+              patient_name: `${order.patient_id.full_name.first} ${order.patient_id.full_name.last}`,
+              patient_id: order.patient_id.patient_id,
+              doctor_name: order.doctor_id?.name || '-'
+            },
+            results: filteredResults.map(result => {
+              const detail = orderDetails.find(d => d._id.toString() === result.detail_id.toString());
+              return {
+                _id: result._id,
+                test_name: detail?.test_id?.test_name || 'Unknown Test',
+                test_code: detail?.test_id?.test_code,
+                result_value: result.result_value,
+                units: result.units || result.component_id?.units,
+                reference_range: result.reference_range || result.component_id?.reference_range,
+                status: result.status,
+                remarks: result.remarks,
+                created_at: result.createdAt,
+                staff_name: detail?.staff_id ? `${detail.staff_id.full_name.first} ${detail.staff_id.full_name.last}` : null,
+                component_name: result.component_id?.component_name
+              };
+            })
+          };
+        }
+      }
+    }
+
+    const allResults = Object.values(resultsByOrder);
+    const totalResults = allResults.length;
+
+    res.json({
+      total: totalResults,
+      page: parseInt(page),
+      totalPages: Math.ceil(totalResults / parseInt(limit)),
+      results: allResults.slice(0, parseInt(limit))
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get All Invoices for Owner's Lab
+ * @route   GET /api/owner/invoices
+ * @access  Private (Owner)
+ */
+exports.getAllInvoices = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 50, startDate, endDate, status, patientName } = req.query;
+
+    let query = { owner_id: req.user._id };
+
+    // Filter by date range if provided
+    if (startDate || endDate) {
+      query.invoice_date = {};
+      if (startDate) query.invoice_date.$gte = new Date(startDate);
+      if (endDate) query.invoice_date.$lte = new Date(endDate);
+    }
+
+    // Filter by payment status if provided
+    if (status) {
+      query.payment_status = status;
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const invoices = await Invoice.find(query)
+      .populate({
+        path: 'order_id',
+        populate: [
+          { path: 'patient_id', select: 'full_name patient_id phone_number email' },
+          { path: 'doctor_id', select: 'name' }
+        ]
+      })
+      .sort({ invoice_date: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // Filter by patient name if provided
+    let filteredInvoices = invoices;
+    if (patientName) {
+      filteredInvoices = invoices.filter(invoice => {
+        if (invoice.order_id?.patient_id?.full_name) {
+          const fullName = `${invoice.order_id.patient_id.full_name.first} ${invoice.order_id.patient_id.full_name.last}`.toLowerCase();
+          return fullName.includes(patientName.toLowerCase());
+        }
+        return false;
+      });
+    }
+
+    const total = await Invoice.countDocuments(query);
+
+    const formattedInvoices = filteredInvoices.map(invoice => ({
+      _id: invoice._id,
+      invoice_id: invoice.invoice_id,
+      invoice_date: invoice.invoice_date,
+      due_date: invoice.due_date,
+      total_amount: invoice.total_amount,
+      payment_status: invoice.payment_status,
+      payment_date: invoice.payment_date,
+      payment_method: invoice.payment_method,
+      notes: invoice.notes,
+      order: invoice.order_id ? {
+        _id: invoice.order_id._id,
+        order_id: invoice.order_id.order_id,
+        order_date: invoice.order_id.order_date,
+        status: invoice.order_id.status,
+        patient_name: invoice.order_id.patient_id ?
+          `${invoice.order_id.patient_id.full_name.first} ${invoice.order_id.patient_id.full_name.last}` : 'Unknown Patient',
+        patient_id: invoice.order_id.patient_id?.patient_id,
+        doctor_name: invoice.order_id.doctor_id?.name || '-'
+      } : null
+    }));
+
+    res.json({
+      total: patientName ? formattedInvoices.length : total,
+      page: parseInt(page),
+      totalPages: Math.ceil((patientName ? formattedInvoices.length : total) / parseInt(limit)),
+      invoices: formattedInvoices
     });
   } catch (err) {
     next(err);

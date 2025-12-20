@@ -85,7 +85,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
     final addressController = TextEditingController(
       text: staff?['address'] ?? '',
     );
-    String role = staff?['role'] ?? 'technician';
+    String role = staff?['role'] ?? '';
 
     final result = await showDialog<bool>(
       context: context,
@@ -169,10 +169,6 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
                       ),
                     ),
                     items: const [
-                      DropdownMenuItem(
-                        value: 'technician',
-                        child: Text('Technician'),
-                      ),
                       DropdownMenuItem(value: 'nurse', child: Text('Nurse')),
                       DropdownMenuItem(
                         value: 'receptionist',
