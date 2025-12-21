@@ -74,7 +74,7 @@ exports.submitRegistration = async (req, res) => {
     const registrationToken = Order.generateRegistrationToken();
     const tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-    // Create pending order with patient info (no barcode yet)
+    // Create pending order with patient info
     const order = await Order.create({
       temp_patient_info: {
         full_name,
@@ -184,7 +184,7 @@ ${lab.lab_name}
           price: t.price
         })),
         total_cost: totalCost,
-        tests_count: tests.length,
+        test_count: tests.length,
         status: "pending",
         next_steps: [
           "Check your email and SMS for account creation link",
@@ -372,7 +372,6 @@ exports.completeRegistration = async (req, res) => {
     }
 
     const Patient = require('../models/Patient');
-    const bcrypt = require('bcrypt');
 
     // Check if username already exists
     const existingUser = await Patient.findOne({ username });
@@ -392,18 +391,15 @@ exports.completeRegistration = async (req, res) => {
       });
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
     // Generate unique patient ID
     const lastPatient = await Patient.findOne().sort({ patient_id: -1 });
     const newPatientId = lastPatient ? parseInt(lastPatient.patient_id) + 1 : 1000;
 
-    // Create patient account
+    // Create patient account (password will be hashed by the model's pre-save hook)
     const patient = await Patient.create({
       patient_id: newPatientId.toString(),
       username,
-      password: hashedPassword,
+      password, // Plain password - will be hashed by model pre-save hook
       full_name: order.temp_patient_info.full_name,
       identity_number: order.temp_patient_info.identity_number,
       birthday: order.temp_patient_info.birthday,
@@ -439,7 +435,12 @@ exports.completeRegistration = async (req, res) => {
       return sum + (detail.test_id.price || 0);
     }, 0);
 
+    // Generate invoice ID
+    const invoiceCount = await Invoice.countDocuments();
+    const invoiceId = `INV-${String(invoiceCount + 1).padStart(6, '0')}`;
+
     const invoice = await Invoice.create({
+      invoice_id: invoiceId,
       order_id: order._id,
       invoice_date: new Date(),
       subtotal,
@@ -464,7 +465,7 @@ exports.completeRegistration = async (req, res) => {
       sender_model: 'Owner',
       receiver_id: patient._id,
       receiver_model: 'Patient',
-      type: 'invoice',
+      type: 'payment',
       title: 'Invoice Generated',
       message: `Your invoice has been generated. Total: ${subtotal} ILS. Payment status: Paid. Please visit the lab for sample collection.`
     });

@@ -106,7 +106,7 @@ async function sendAppointmentReminder(patientPhone, patientEmail, appointmentDe
 async function sendWhatsAppTemplate(to, contentSid, contentVariables, useFallback = true, emailSubject = '', emailHtml = '') {
   try {
     const payload = {
-      from: SANDBOX_NUMBER,
+      from: WHATSAPP_NUMBER,
       to: `whatsapp:${to}`,
       contentSid: contentSid,
       contentVariables: JSON.stringify(contentVariables),

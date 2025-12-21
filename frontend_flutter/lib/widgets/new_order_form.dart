@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import '../config/theme.dart';
 import '../services/staff_api_service.dart';
 import '../widgets/custom_text_field.dart';
+import '../widgets/test_search_widget.dart';
 
 class NewOrderForm extends StatefulWidget {
-  const NewOrderForm({super.key});
+  final Future<void> Function()? onOrderCreated;
+
+  const NewOrderForm({super.key, this.onOrderCreated});
 
   @override
   State<NewOrderForm> createState() => _NewOrderFormState();
@@ -20,10 +23,20 @@ class _NewOrderFormState extends State<NewOrderForm> {
   final _identityNumberController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _addressController = TextEditingController();
+  final _streetController = TextEditingController();
+  final _cityController = TextEditingController();
+  final _insuranceProviderController = TextEditingController();
+  final _insuranceNumberController = TextEditingController();
+  final _notesController = TextEditingController();
 
   DateTime? _birthday;
   String _selectedGender = 'Male';
+  String _selectedSocialStatus = 'Single';
+
+  // Doctor selection
+  List<Map<String, dynamic>> _availableDoctors = [];
+  Map<String, dynamic>? _selectedDoctor;
+  bool _isLoadingDoctors = false;
 
   // Available tests and selected tests
   List<Map<String, dynamic>> _availableTests = [];
@@ -31,10 +44,14 @@ class _NewOrderFormState extends State<NewOrderForm> {
   bool _isLoadingTests = false;
   bool _isSubmitting = false;
 
+  // Filtered tests for display
+  List<Map<String, dynamic>> _filteredTests = [];
+
   @override
   void initState() {
     super.initState();
     _loadAvailableTests();
+    _loadAvailableDoctors();
   }
 
   @override
@@ -45,8 +62,36 @@ class _NewOrderFormState extends State<NewOrderForm> {
     _identityNumberController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
-    _addressController.dispose();
+    _streetController.dispose();
+    _cityController.dispose();
+    _insuranceProviderController.dispose();
+    _insuranceNumberController.dispose();
+    _notesController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadAvailableDoctors() async {
+    setState(() => _isLoadingDoctors = true);
+
+    try {
+      final response = await StaffApiService.getLabDoctors();
+
+      if (mounted) {
+        setState(() {
+          _availableDoctors = List<Map<String, dynamic>>.from(
+            response['doctors'] ?? [],
+          );
+          _isLoadingDoctors = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingDoctors = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to load doctors: $e')));
+      }
+    }
   }
 
   Future<void> _loadAvailableTests() async {
@@ -60,6 +105,7 @@ class _NewOrderFormState extends State<NewOrderForm> {
           _availableTests = List<Map<String, dynamic>>.from(
             response['tests'] ?? [],
           );
+          _filteredTests = _availableTests;
           _isLoadingTests = false;
         });
       }
@@ -143,13 +189,21 @@ class _NewOrderFormState extends State<NewOrderForm> {
           'phone_number': _phoneController.text.trim(),
           'birthday': _birthday!.toIso8601String(),
           'gender': _selectedGender,
-          'address': _addressController.text.trim(),
+          'social_status': _selectedSocialStatus,
+          'address': {
+            'street': _streetController.text.trim(),
+            'city': _cityController.text.trim(),
+            'country': 'Palestine',
+          },
+          'insurance_provider': _insuranceProviderController.text.trim(),
+          'insurance_number': _insuranceNumberController.text.trim(),
+          'notes': _notesController.text.trim(),
         },
         testIds: _selectedTests.map((t) => t['_id'].toString()).toList(),
+        doctorId: _selectedDoctor?['_id'],
       );
 
       if (mounted) {
-        final barcode = response['order']?['barcode'] ?? 'N/A';
         final credentials = response['credentials'];
         final isNewAccount = response['patient']?['is_new_account'] ?? false;
 
@@ -170,15 +224,6 @@ class _NewOrderFormState extends State<NewOrderForm> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Barcode: $barcode',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue,
-                    ),
-                  ),
-                  SizedBox(height: 16),
                   if (isNewAccount && credentials != null) ...[
                     Container(
                       padding: EdgeInsets.all(16),
@@ -273,7 +318,10 @@ class _NewOrderFormState extends State<NewOrderForm> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () async {
+                  await widget.onOrderCreated?.call();
+                  Navigator.pop(context);
+                },
                 child: Text('OK'),
               ),
             ],
@@ -288,11 +336,17 @@ class _NewOrderFormState extends State<NewOrderForm> {
         _identityNumberController.clear();
         _emailController.clear();
         _phoneController.clear();
-        _addressController.clear();
+        _streetController.clear();
+        _cityController.clear();
+        _insuranceProviderController.clear();
+        _insuranceNumberController.clear();
+        _notesController.clear();
         setState(() {
           _birthday = null;
           _selectedTests.clear();
           _selectedGender = 'Male';
+          _selectedSocialStatus = 'Single';
+          _selectedDoctor = null;
           _isSubmitting = false;
         });
       }
@@ -460,7 +514,7 @@ class _NewOrderFormState extends State<NewOrderForm> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Birthday & Gender
+                  // Birthday & Gender & Social Status
                   Row(
                     children: [
                       Expanded(
@@ -483,13 +537,13 @@ class _NewOrderFormState extends State<NewOrderForm> {
                       const SizedBox(width: 16),
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          initialValue: _selectedGender,
+                          value: _selectedGender,
                           decoration: const InputDecoration(
                             labelText: 'Gender',
                             prefixIcon: Icon(Icons.wc),
                             border: OutlineInputBorder(),
                           ),
-                          items: ['Male', 'Female'].map((gender) {
+                          items: ['Male', 'Female', 'Other'].map((gender) {
                             return DropdownMenuItem(
                               value: gender,
                               child: Text(gender),
@@ -504,20 +558,113 @@ class _NewOrderFormState extends State<NewOrderForm> {
                       ),
                       const SizedBox(width: 16),
                       Expanded(
-                        child: CustomTextField(
-                          controller: _addressController,
-                          label: 'Address',
-                          prefixIcon: Icons.location_on,
-                          validator: (value) {
-                            if (value?.isEmpty ?? true) {
-                              return 'Address is required';
+                        child: DropdownButtonFormField<String>(
+                          value: _selectedSocialStatus,
+                          decoration: const InputDecoration(
+                            labelText: 'Social Status',
+                            prefixIcon: Icon(Icons.family_restroom),
+                            border: OutlineInputBorder(),
+                          ),
+                          items: ['Single', 'Married', 'Divorced', 'Widowed']
+                              .map((status) {
+                                return DropdownMenuItem(
+                                  value: status,
+                                  child: Text(status),
+                                );
+                              })
+                              .toList(),
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() => _selectedSocialStatus = value);
                             }
-                            return null;
                           },
                         ),
                       ),
                     ],
                   ),
+                  const SizedBox(height: 16),
+
+                  // Address Fields
+                  Row(
+                    children: [
+                      Expanded(
+                        child: CustomTextField(
+                          controller: _streetController,
+                          label: 'Street Address',
+                          prefixIcon: Icons.location_on,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: CustomTextField(
+                          controller: _cityController,
+                          label: 'City',
+                          prefixIcon: Icons.location_city,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Insurance Information
+                  Row(
+                    children: [
+                      Expanded(
+                        child: CustomTextField(
+                          controller: _insuranceProviderController,
+                          label: 'Insurance Provider',
+                          prefixIcon: Icons.health_and_safety,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: CustomTextField(
+                          controller: _insuranceNumberController,
+                          label: 'Insurance Number',
+                          prefixIcon: Icons.confirmation_number,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Notes
+                  CustomTextField(
+                    controller: _notesController,
+                    label: 'Notes',
+                    prefixIcon: Icons.note,
+                    maxLines: 3,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Doctor Selection
+                  _isLoadingDoctors
+                      ? const Center(child: CircularProgressIndicator())
+                      : DropdownButtonFormField<Map<String, dynamic>>(
+                          value: _selectedDoctor,
+                          decoration: const InputDecoration(
+                            labelText: 'Referring Doctor (Optional)',
+                            prefixIcon: Icon(Icons.medical_services),
+                            border: OutlineInputBorder(),
+                          ),
+                          items: [
+                            const DropdownMenuItem(
+                              value: null,
+                              child: Text('No referring doctor'),
+                            ),
+                            ..._availableDoctors.map((doctor) {
+                              return DropdownMenuItem(
+                                value: doctor,
+                                child: Text(
+                                  '${doctor['name']} ${doctor['specialty'] != null ? '(${doctor['specialty']})' : ''}',
+                                ),
+                              );
+                            }).toList(),
+                          ],
+                          onChanged: (value) {
+                            setState(() => _selectedDoctor = value);
+                          },
+                        ),
                 ],
               ),
             ),
@@ -565,6 +712,19 @@ class _NewOrderFormState extends State<NewOrderForm> {
                   ),
                   const SizedBox(height: 16),
 
+                  // Search Bar
+                  TestSearchWidget(
+                    allTests: _availableTests,
+                    onFiltered: (filtered) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) {
+                          setState(() => _filteredTests = filtered);
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
                   if (_isLoadingTests)
                     const Center(
                       child: Padding(
@@ -597,7 +757,7 @@ class _NewOrderFormState extends State<NewOrderForm> {
                     )
                   else
                     Column(
-                      children: _availableTests.map((test) {
+                      children: _filteredTests.map((test) {
                         final isSelected = _isTestSelected(test);
                         final testName = test['test_name'] ?? 'Unknown Test';
                         final testCode = test['test_code'] ?? '';

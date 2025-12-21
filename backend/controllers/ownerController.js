@@ -2722,7 +2722,7 @@ exports.getMyFeedback = async (req, res, next) => {
     const feedback = await Feedback.find(query)
       .populate({
         path: 'target_id',
-        select: 'name lab_name test_name barcode'
+        select: 'name lab_name test_name'
       })
       .sort({ createdAt: -1 })
       .limit(limit * 1)
@@ -2976,7 +2976,6 @@ exports.getAllResults = async (req, res, next) => {
     // Get all results for these order details
     const detailIds = orderDetails.map(d => d._id);
     const results = await Result.find({ detail_id: { $in: detailIds } })
-      .populate('component_id', 'component_name units reference_range')
       .sort({ createdAt: -1 });
 
     // Group results by order
@@ -3030,13 +3029,13 @@ exports.getAllResults = async (req, res, next) => {
                 test_name: detail?.test_id?.test_name || 'Unknown Test',
                 test_code: detail?.test_id?.test_code,
                 result_value: result.result_value,
-                units: result.units || result.component_id?.units,
-                reference_range: result.reference_range || result.component_id?.reference_range,
+                units: result.units,
+                reference_range: result.reference_range,
                 status: result.status,
                 remarks: result.remarks,
                 created_at: result.createdAt,
                 staff_name: detail?.staff_id ? `${detail.staff_id.full_name.first} ${detail.staff_id.full_name.last}` : null,
-                component_name: result.component_id?.component_name
+                component_name: result.component_name
               };
             })
           };

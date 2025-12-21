@@ -334,7 +334,7 @@ exports.requestTests = async (req, res, next) => {
       }
     }
 
-    // Create order (within transaction) - barcode generated when sample collected
+    // Create order (within transaction)
     const [newOrder] = await Order.create([{
       patient_id: req.user._id,
       requested_by: req.user._id, // Self-requested by patient
@@ -360,8 +360,13 @@ exports.requestTests = async (req, res, next) => {
     // Calculate invoice
     const subtotal = tests.reduce((sum, test) => sum + (test.price || 0), 0);
     
+    // Generate invoice ID
+    const invoiceCount = await Invoice.countDocuments();
+    const invoiceId = `INV-${String(invoiceCount + 1).padStart(6, '0')}`;
+    
     // Create invoice (within transaction)
     const [invoice] = await Invoice.create([{
+      invoice_id: invoiceId,
       order_id: newOrder._id,
       invoice_date: new Date(),
       subtotal,
@@ -386,7 +391,7 @@ exports.requestTests = async (req, res, next) => {
       sender_model: 'Patient',
       receiver_id: req.user._id,
       receiver_model: 'Patient',
-      type: 'invoice',
+      type: 'payment',
       title: 'Invoice Generated',
       message: `Your invoice for order has been generated. Total: ${subtotal} ILS. Payment status: Paid.`
     }], { session });
@@ -515,7 +520,6 @@ exports.getOrdersWithResults = async (req, res, next) => {
 
         return {
           order_id: order._id,
-          barcode: order.barcode,
           order_date: order.order_date,
           doctor_name: doctorName,
           test_count: details.length,
@@ -625,7 +629,6 @@ exports.getOrderResults = async (req, res, next) => {
     res.json({
       order: {
         order_id: order._id,
-        barcode: order.barcode,
         order_date: order.order_date,
         doctor_name: doctorName,
         lab_name: labName,
@@ -697,7 +700,6 @@ exports.getMyResults = async (req, res, next) => {
       
       return {
         order_id: detail.order_id._id,
-        order_barcode: detail.order_id.barcode,
         order_date: detail.order_id.order_date,
         doctor_name: doctorName,
         test_name: detail.test_id?.test_name || 'Unknown Test',
@@ -815,7 +817,6 @@ exports.downloadResult = async (req, res, next) => {
         gender: patient.gender
       },
       order: {
-        barcode: detail.order_id.barcode,
         date: detail.order_id.order_date
       },
       test: {
@@ -1135,7 +1136,7 @@ exports.getDashboard = async (req, res, next) => {
       status: 'completed'
     })
       .populate('test_id', 'test_name')
-      .populate('order_id', 'order_date barcode')
+      .populate('order_id', 'order_date')
       .sort({ '-order_id.order_date': -1 })
       .limit(5);
 
@@ -1144,7 +1145,6 @@ exports.getDashboard = async (req, res, next) => {
         const result = await Result.findOne({ detail_id: detail._id });
         return {
           test_name: detail.test_id?.test_name,
-          order_barcode: detail.order_id?.barcode,
           order_date: detail.order_id?.order_date,
           has_result: !!result
         };
@@ -1367,7 +1367,7 @@ exports.getMyFeedback = async (req, res, next) => {
     const feedback = await Feedback.find(query)
       .populate({
         path: 'target_id',
-        select: 'name lab_name test_name barcode'
+        select: 'name lab_name test_name'
       })
       .sort({ createdAt: -1 })
       .limit(limit * 1)
@@ -1385,6 +1385,89 @@ exports.getMyFeedback = async (req, res, next) => {
         pages: Math.ceil(total / limit)
       }
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Request Invoice Report (Patient requests PDF via email/WhatsApp)
+ * @route   POST /api/patient/invoices/:invoiceId/send-report
+ * @access  Private (Patient)
+ */
+exports.requestInvoiceReport = async (req, res, next) => {
+  try {
+    const invoiceId = req.params.invoiceId;
+
+    // Find invoice belonging to the patient
+    const invoice = await Invoice.findOne({
+      _id: invoiceId,
+      order_id: { $exists: true }
+    })
+    .populate({
+      path: 'order_id',
+      match: { patient_id: req.user._id },
+      populate: {
+        path: 'owner_id',
+        select: 'lab_name address phone_number'
+      }
+    })
+    .populate({
+      path: 'tests.test_id',
+      select: 'test_name price'
+    });
+
+    if (!invoice || !invoice.order_id) {
+      return res.status(404).json({ message: '❌ Invoice not found or access denied' });
+    }
+
+    const patient = await Patient.findById(req.user._id);
+    const labName = invoice.order_id.owner_id?.lab_name || 'Medical Lab';
+
+    // Create invoice URL for online viewing
+    const invoiceUrl = `${process.env.FRONTEND_URL || 'http://localhost:8080'}/patient-dashboard/bill-details/${invoice.order_id._id}`;
+
+    // Prepare invoice data for PDF generation
+    const invoiceData = {
+      invoice_id: invoice.invoice_id,
+      created_at: invoice.created_at,
+      status: invoice.status,
+      subtotal: invoice.subtotal || 0,
+      discount: invoice.discount || 0,
+      total_amount: invoice.total_amount || 0,
+      lab: {
+        name: labName,
+        address: invoice.order_id.owner_id?.address || 'N/A',
+        phone_number: invoice.order_id.owner_id?.phone_number || 'N/A'
+      },
+      patient: {
+        name: `${patient.full_name?.first || ''} ${patient.full_name?.last || ''}`.trim(),
+        patient_id: patient.patient_id
+      },
+      tests: invoice.tests?.map(test => ({
+        test_name: test.test_id?.test_name || 'Unknown Test',
+        price: test.price || 0,
+        quantity: test.quantity || 1
+      })) || [],
+      payments: invoice.payments || []
+    };
+
+    // Import the notification utility
+    const { sendInvoiceReport } = require('../utils/sendNotification');
+
+    // Send the invoice report
+    const notificationResult = await sendInvoiceReport(
+      patient,
+      invoiceData,
+      invoiceUrl,
+      labName
+    );
+
+    res.json({
+      message: "✅ Invoice report sent successfully to your email and WhatsApp",
+      notification: notificationResult
+    });
+
   } catch (err) {
     next(err);
   }

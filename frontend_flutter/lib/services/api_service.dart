@@ -38,6 +38,11 @@ class ApiService {
     Map<String, dynamic> body,
   ) async {
     final url = Uri.parse('${ApiConfig.baseUrl}$endpoint');
+
+    print('🔍 HTTP DEBUG: POST $url');
+    print('🔍 HTTP DEBUG: Headers: ${_getHeaders()}');
+    print('🔍 HTTP DEBUG: Body: $body');
+
     final response = await http
         .post(url, headers: _getHeaders(), body: jsonEncode(body))
         .timeout(
@@ -46,6 +51,9 @@ class ApiService {
             throw Exception('Request timeout - please check your connection');
           },
         );
+
+    print('🔍 HTTP DEBUG: Response status: ${response.statusCode}');
+    print('🔍 HTTP DEBUG: Response body: ${response.body}');
 
     return _handleResponse(response);
   }

@@ -44,7 +44,6 @@ class _DoctorPatientReportScreenState extends State<DoctorPatientReportScreen> {
         setState(() {
           _orderInfo = {
             'order_id': response['order_id'],
-            'barcode': response['barcode'],
             'order_date': response['order_date'],
             'status': response['status'],
             'remarks': response['remarks'],

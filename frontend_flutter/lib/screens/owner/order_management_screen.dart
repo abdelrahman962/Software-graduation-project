@@ -392,7 +392,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Order ${order['barcode'] ?? 'No Barcode'}',
+                            'Order ${order['_id'] ?? 'No ID'}',
                             style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(fontWeight: FontWeight.bold),
                           ),
@@ -537,14 +537,6 @@ class _OrderDetailsDialog extends StatelessWidget {
                               ?.copyWith(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Barcode: ${order['barcode'] ?? 'Not assigned'}',
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(
-                                color: Colors.white.withValues(alpha: 0.9),
                               ),
                         ),
                       ],

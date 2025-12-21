@@ -19,58 +19,38 @@ router.post('/webhook', async (req, res) => {
 
     // Find admin by phone number
     const admin = await Admin.findOne({ phone_number: senderPhone });
-    if (!admin) {
-      console.log('Message from unknown number, ignoring');
+    if (admin) {
+      // Admin sending message - send directly to their owner
+      const owner = await LabOwner.findOne({ admin_id: admin._id });
+      if (owner) {
+        const directMessage = `📬 Direct Message from Admin\n\n💬 ${Body}\n\n---\nRegards,\n${admin.full_name.first} ${admin.full_name.last}`;
+        await sendWhatsAppMessage(owner.phone_number, directMessage);
+        console.log('Direct message sent to owner');
+      } else {
+        console.log('No owner found for this admin');
+      }
       return res.status(200).send('OK');
     }
 
-    // Find the most recent owner contact notification that this admin hasn't replied to
-    const recentOwnerMessage = await Notification.findOne({
-      receiver_id: admin._id,
-      receiver_model: 'Admin',
-      type: 'system',
-      is_read: false
-    }).sort({ createdAt: -1 });
-
-    if (!recentOwnerMessage) {
-      console.log('No recent owner message to reply to');
+    // Find owner by phone number
+    const owner = await LabOwner.findOne({ phone_number: senderPhone });
+    if (owner) {
+      // Owner sending message - send directly to their admin
+      const admin = await Admin.findById(owner.admin_id);
+      if (admin) {
+        const directMessage = `📬 Direct Message from Owner\n\n💬 ${Body}\n\n---\nRegards,\n${owner.name.first} ${owner.name.last}`;
+        await sendWhatsAppMessage(admin.phone_number, directMessage);
+        console.log('Direct message sent to admin');
+      } else {
+        console.log('No admin found for this owner');
+      }
       return res.status(200).send('OK');
     }
 
-    // Get the owner who sent the original message
-    const owner = await LabOwner.findById(recentOwnerMessage.sender_id);
-    if (!owner) {
-      console.log('Owner not found');
-      return res.status(200).send('OK');
-    }
-
-    // Send WhatsApp reply to owner
-    const replyMessage = `📬 Reply from Admin\n\n💬 ${Body}\n\n---\nRegards,\nMedical Lab System Admin`;
-
-    await sendWhatsAppMessage(owner.phone_number, replyMessage);
-
-    // Create reply notification in database
-    await Notification.create({
-      sender_id: admin._id,
-      sender_model: 'Admin',
-      receiver_id: owner._id,
-      receiver_model: 'Owner',
-      type: 'message',
-      title: 'Admin Reply',
-      message: Body,
-      parent_id: recentOwnerMessage._id,
-      conversation_id: recentOwnerMessage.conversation_id || recentOwnerMessage._id,
-      is_reply: true
-    });
-
-    // Mark original notification as read
-    recentOwnerMessage.is_read = true;
-    await recentOwnerMessage.save();
-
+    console.log('Message from unknown number, ignoring');
     res.status(200).send('OK');
-
   } catch (error) {
-    console.error('WhatsApp webhook error:', error);
+    console.error('Webhook error:', error);
     res.status(500).send('Error');
   }
 });

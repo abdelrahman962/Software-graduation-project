@@ -168,7 +168,7 @@ exports.requestTestForPatient = async (req, res) => {
       });
     }
 
-    // Create order (within transaction) - barcode will be generated when sample collected
+    // Create order (within transaction)
     const newOrder = await Order.create([{
       patient_id: patient._id,
       requested_by: doctor_id,
@@ -194,6 +194,7 @@ exports.requestTestForPatient = async (req, res) => {
     // Calculate invoice
     const subtotal = tests.reduce((sum, test) => sum + (test.price || 0), 0);
     const invoice = await Invoice.create([{
+      invoice_id: `INV-${String(Date.now()).slice(-6)}`, // Simple ID for doctor orders
       order_id: newOrder[0]._id,
       invoice_date: new Date(),
       subtotal,
@@ -218,7 +219,7 @@ exports.requestTestForPatient = async (req, res) => {
       sender_model: 'Doctor',
       receiver_id: patient._id,
       receiver_model: 'Patient',
-      type: 'invoice',
+      type: 'payment',
       title: 'Invoice Generated',
       message: `Your invoice for tests ordered by Dr. ${req.user.username || 'your doctor'} has been generated. Total: ${subtotal} ILS. Payment status: Paid.`
     }], { session });
@@ -392,7 +393,6 @@ exports.getPatientTestHistory = async (req, res) => {
 
         return {
           order_id: order._id,
-          barcode: order.barcode,
           order_date: order.order_date,
           status: order.status,
           remarks: order.remarks,
@@ -452,7 +452,7 @@ exports.markTestUrgent = async (req, res) => {
       receiver_model: 'Owner',
       type: 'request',
       title: '🚨 Order Marked as URGENT',
-      message: `Order ${order.barcode} has been marked as URGENT by doctor. Immediate processing required.`
+      message: `Order ${order._id} has been marked as URGENT by doctor. Immediate processing required.`
     });
 
     // Notify all lab staff
@@ -466,7 +466,7 @@ exports.markTestUrgent = async (req, res) => {
       receiver_model: 'Staff',
       type: 'request',
       title: '🚨 URGENT Order',
-      message: `Order ${order.barcode} marked as URGENT. Please prioritize.`
+      message: `Order ${order._id} marked as URGENT. Please prioritize.`
     }));
 
     if (staffNotifications.length > 0) {
@@ -478,7 +478,6 @@ exports.markTestUrgent = async (req, res) => {
       message: '✅ Order marked as urgent and notifications sent',
       order: {
         _id: order._id,
-        barcode: order.barcode,
         status: order.status,
         remarks: order.remarks
       }
@@ -752,7 +751,6 @@ exports.getDashboard = async (req, res) => {
       },
       recentOrders: recentOrders.map(order => ({
         order_id: order._id,
-        barcode: order.barcode,
         patient: order.patient_id ? 
           `${order.patient_id.full_name.first} ${order.patient_id.full_name.last}` : 
           'N/A',
@@ -986,7 +984,6 @@ exports.getPatientOrdersWithResults = async (req, res) => {
 
         return {
           order_id: order._id,
-          barcode: order.barcode,
           order_date: order.order_date,
           patient_name: patientFullName,
           patient_identity: patient?.identity_number || '',
@@ -1077,7 +1074,6 @@ exports.getOrderResults = async (req, res) => {
     res.json({
       success: true,
       order_id: order._id,
-      barcode: order.barcode,
       order_date: order.order_date,
       status: order.status,
       remarks: order.remarks,

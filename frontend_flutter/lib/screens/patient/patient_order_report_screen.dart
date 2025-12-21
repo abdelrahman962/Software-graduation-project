@@ -370,7 +370,7 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  '🚨 CRITICAL: Abnormal Results Detected',
+                                  'CRITICAL: Abnormal Results Detected',
                                   style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
@@ -844,7 +844,11 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
           Expanded(
             flex: 1,
             child: Text(
-              unit,
+              unit
+                  .replaceAll('μ', 'u')
+                  .replaceAll('³', '3')
+                  .replaceAll('⁶', '6')
+                  .replaceAll('×', 'x'),
               textAlign: TextAlign.center,
               style: AppTheme.medicalTextStyle(
                 fontSize: 13,
@@ -1068,7 +1072,11 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                 Expanded(
                   flex: 1,
                   child: Text(
-                    component['units'] ?? 'N/A',
+                    (component['units'] ?? 'N/A')
+                        .replaceAll('μ', 'u')
+                        .replaceAll('³', '3')
+                        .replaceAll('⁶', '6')
+                        .replaceAll('×', 'x'),
                     textAlign: TextAlign.center,
                     style: AppTheme.medicalTextStyle(
                       fontSize: 12,
@@ -1247,7 +1255,7 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                           borderRadius: pw.BorderRadius.circular(4),
                         ),
                         child: pw.Text(
-                          'Order #${_orderInfo?['barcode'] ?? 'N/A'}',
+                          'Order #${_orderInfo?['_id'] ?? 'N/A'}',
                           style: const pw.TextStyle(
                             color: PdfColors.white,
                             fontSize: 12,
@@ -1277,7 +1285,7 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                     pw.Row(
                       children: [
                         pw.Text(
-                          '🚨 CRITICAL RESULTS',
+                          'CRITICAL RESULTS',
                           style: pw.TextStyle(
                             fontSize: 16,
                             fontWeight: pw.FontWeight.bold,
@@ -1416,7 +1424,7 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                                         right: 4,
                                       ),
                                       child: pw.Text(
-                                        '⚠️',
+                                        'WARNING',
                                         style: const pw.TextStyle(
                                           fontSize: 8,
                                           color: PdfColors.red,
@@ -1424,7 +1432,7 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                                       ),
                                     ),
                                   pw.Text(
-                                    '  ↳ ${component['component_name'] ?? 'Unknown'}',
+                                    '  - ${component['component_name'] ?? 'Unknown'}',
                                     style: pw.TextStyle(
                                       fontSize: 9,
                                       fontWeight: isAbnormal
@@ -1456,7 +1464,13 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                             _buildPdfCell(
                               component['reference_range'] ?? 'N/A',
                             ),
-                            _buildPdfCell(component['units'] ?? 'N/A'),
+                            _buildPdfCell(
+                              (component['units'] ?? 'N/A')
+                                  .replaceAll('μ', 'u')
+                                  .replaceAll('³', '3')
+                                  .replaceAll('⁶', '6')
+                                  .replaceAll('×', 'x'),
+                            ),
                           ],
                         ),
                       );
@@ -1500,7 +1514,14 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                             result['test_result']?.toString() ?? 'N/A',
                           ),
                           _buildPdfCell(result['reference_range'] ?? 'N/A'),
-                          _buildPdfCell(result['units'] ?? 'N/A'),
+                          _buildPdfCell(
+                            result['units'] ??
+                                'N/A'
+                                    .replaceAll('μ', 'u')
+                                    .replaceAll('³', '3')
+                                    .replaceAll('⁶', '6')
+                                    .replaceAll('×', 'x'),
+                          ),
                         ],
                       ),
                     ];
@@ -1559,9 +1580,9 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                   ),
                   pw.SizedBox(height: 4),
                   pw.Text(
-                    '• These results should be interpreted by your healthcare provider\n'
-                    '• Keep this report for your medical records\n'
-                    '• Contact your doctor if you have any questions',
+                    '- These results should be interpreted by your healthcare provider\n'
+                    '- Keep this report for your medical records\n'
+                    '- Contact your doctor if you have any questions',
                     style: const pw.TextStyle(fontSize: 10),
                   ),
                 ],
@@ -1582,7 +1603,7 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
     // Show PDF preview and print dialog
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => pdf.save(),
-      name: 'Laboratory_Report_${_orderInfo?['barcode'] ?? 'N/A'}.pdf',
+      name: 'Laboratory_Report_${_orderInfo?['_id'] ?? 'N/A'}.pdf',
     );
   }
 

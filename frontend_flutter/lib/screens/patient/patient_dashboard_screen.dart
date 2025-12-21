@@ -865,7 +865,7 @@ class _OrderDetailsModalState extends State<_OrderDetailsModal> {
                         ),
                         Text(
                           DateFormat(
-                            'MMM dd, yyyy • hh:mm a',
+                            'MMM dd, yyyy - hh:mm a',
                           ).format(orderDate),
                           style: const TextStyle(
                             color: AppTheme.textMedium,

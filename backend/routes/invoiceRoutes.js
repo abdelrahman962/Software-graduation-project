@@ -60,4 +60,16 @@ router.post(
   invoiceController.applyDiscount
 );
 
+/**
+ * @route   POST /api/invoice/send-report/:invoiceId
+ * @desc    Send invoice report to patient via email and WhatsApp
+ * @access  Private (Staff/Owner)
+ */
+router.post(
+  '/send-report/:invoiceId',
+  authMiddleware,
+  roleMiddleware(['Staff', 'Owner']),
+  invoiceController.sendInvoiceReport
+);
+
 module.exports = router;

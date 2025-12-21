@@ -455,13 +455,6 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
                       order['order_date']?.substring(0, 10) ?? 'N/A',
                     ),
                   ),
-                  Expanded(
-                    child: _buildInfoItem(
-                      Icons.qr_code,
-                      'Barcode',
-                      order['barcode'] ?? 'Pending',
-                    ),
-                  ),
                 ],
               ),
               const SizedBox(height: 12),

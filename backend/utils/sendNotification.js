@@ -5,6 +5,7 @@
 const { sendWhatsAppMessage } = require('./sendWhatsApp');
 const { sendEmail, sendHtmlEmail, sendEmailWithAttachments } = require('./sendEmail');
 const { formatDate, formatDateTime } = require('./dateUtils');
+const { generateTestResultPDF, generateInvoicePDF, cleanupPDFFile } = require('./pdfGenerator');
 const Result = require('../models/Result');
 
 /**
@@ -114,9 +115,12 @@ async function sendNotification(options) {
  * @param {string} barcode - Order barcode/ID
  * @param {boolean} isAbnormal - Whether results are abnormal
  * @param {number} abnormalCount - Number of abnormal components/values
+ * @param {Object} order - Order object (for PDF generation)
+ * @param {Object} result - Result object (for PDF generation)
+ * @param {Object} detail - Order detail object (for PDF generation)
  * @returns {Promise<Object>} - Result object
  */
-async function sendLabReport(patient, test, resultUrl, isUrgent, labName, barcode, isAbnormal = false, abnormalCount = 0) {
+async function sendLabReport(patient, test, resultUrl, isUrgent, labName, barcode, isAbnormal = false, abnormalCount = 0, order = null, result = null, detail = null) {
   const patientName = `${patient.full_name?.first || ''} ${patient.full_name?.last || ''}`.trim();
   const patientPhone = patient.phone_number;
   const patientEmail = patient.email;
@@ -162,17 +166,195 @@ async function sendLabReport(patient, test, resultUrl, isUrgent, labName, barcod
       <br>
       <p>Best regards,<br><strong>Medical Laboratory Team</strong></p>
       <hr style="border: none; border-top: 1px solid #eee;">
-      <p style="color: #666; font-size: 12px;">This is an automated message from the Medical Lab System.</p>
+      <p style="color: #666; font-size: 12px;">This is an automated message from the Medical Lab System. Your PDF report is attached to this email.</p>
     </div>
   `;
 
-  return await sendNotification({
-    phone: patientPhone,
-    email: patientEmail,
-    whatsappMessage,
-    emailSubject,
-    emailHtml
-  });
+  // Generate PDF attachment if we have the required data
+  let attachments = [];
+  let pdfPath = null;
+
+  if (order && result && detail) {
+    try {
+      // Prepare report data for PDF generation
+      const reportData = {
+        lab: {
+          name: labName,
+          address: order.owner_id?.address || 'N/A',
+          phone_number: order.owner_id?.phone_number || 'N/A'
+        },
+        patient: {
+          name: patientName,
+          patient_id: patient.patient_id,
+          age: patient.birthday ? Math.floor((new Date() - new Date(patient.birthday)) / 31557600000) : null,
+          gender: patient.gender
+        },
+        order: {
+          date: order.order_date
+        },
+        test: {
+          name: test.test_name,
+          code: test.test_code
+        },
+        result: {
+          value: result.result_value,
+          units: result.units,
+          reference_range: result.reference_range,
+          remarks: result.remarks,
+          components: result.components || []
+        },
+        technician: detail.staff_id ? `${detail.staff_id.full_name?.first || ''} ${detail.staff_id.full_name?.last || ''}`.trim() : null,
+        report_date: new Date()
+      };
+
+      // Generate PDF
+      pdfPath = await generateTestResultPDF(reportData);
+
+      // Add PDF as attachment
+      attachments.push({
+        filename: `Lab_Report_${test.test_name.replace(/\s+/g, '_')}_${barcode}.pdf`,
+        path: pdfPath,
+        contentType: 'application/pdf'
+      });
+
+      console.log('✅ PDF report generated for email attachment');
+    } catch (pdfError) {
+      console.error('❌ Failed to generate PDF:', pdfError);
+      // Continue without PDF - don't fail the notification
+    }
+  }
+
+  try {
+    const notificationResult = await sendNotification({
+      phone: patientPhone,
+      email: patientEmail,
+      whatsappMessage,
+      emailSubject,
+      emailHtml,
+      attachments
+    });
+
+    // Clean up PDF file after sending
+    if (pdfPath) {
+      setTimeout(() => cleanupPDFFile(pdfPath), 5000); // Clean up after 5 seconds
+    }
+
+    return notificationResult;
+  } catch (error) {
+    // Clean up PDF file on error
+    if (pdfPath) {
+      cleanupPDFFile(pdfPath);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Send invoice report via both WhatsApp and Email with PDF attachment
+ * @param {Object} patient - Patient object
+ * @param {Object} invoice - Invoice object
+ * @param {string} invoiceUrl - URL to view invoice online
+ * @param {string} labName - Lab name
+ * @returns {Promise<Object>} - Result object
+ */
+async function sendInvoiceReport(patient, invoice, invoiceUrl, labName) {
+  const patientName = `${patient.full_name?.first || ''} ${patient.full_name?.last || ''}`.trim();
+  const patientPhone = patient.phone_number;
+  const patientEmail = patient.email;
+
+  const whatsappMessage = `🧾 Your invoice from ${labName} is ready.\n\nHello ${patientName},\n\n✅ Your invoice is now available.\n\n🔗 View your invoice: ${invoiceUrl}\n\n💰 Total Amount: ₪${invoice.total_amount?.toFixed(2) || 'N/A'}\n🧾 Invoice ID: ${invoice.invoice_id || `INV-${invoice._id.toString().slice(-6).toUpperCase()}`}\n\n🏥 Lab: ${labName}\n\nBest regards,\nMedical Laboratory Team`;
+
+  const emailSubject = `Invoice Available - ${labName}`;
+
+  const emailHtml = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #4A90E2;">Invoice Available</h2>
+      <p>Hello ${patientName},</p>
+      <p>Your invoice from <strong>${labName}</strong> is now available.</p>
+
+      <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: center;">
+        <a href="${invoiceUrl}" style="background-color: #4A90E2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">View Your Invoice</a>
+      </div>
+
+      <div style="background-color: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <p style="margin: 0;"><strong>🏥 Lab:</strong> ${labName}</p>
+        <p style="margin: 5px 0 0 0;"><strong>🧾 Invoice ID:</strong> ${invoice.invoice_id || `INV-${invoice._id.toString().slice(-6).toUpperCase()}`}</p>
+        <p style="margin: 5px 0 0 0;"><strong>💰 Total Amount:</strong> ₪${invoice.total_amount?.toFixed(2) || 'N/A'}</p>
+        <p style="margin: 5px 0 0 0;"><strong>📅 Date:</strong> ${new Date(invoice.created_at).toLocaleDateString()}</p>
+      </div>
+
+      <br>
+      <p>Best regards,<br><strong>Medical Laboratory Team</strong></p>
+      <hr style="border: none; border-top: 1px solid #eee;">
+      <p style="color: #666; font-size: 12px;">This is an automated message from the Medical Lab System. Your PDF invoice is attached to this email.</p>
+    </div>
+  `;
+
+  // Generate PDF attachment
+  let attachments = [];
+  let pdfPath = null;
+
+  try {
+    // Prepare invoice data for PDF generation
+    const invoiceData = {
+      invoice_id: invoice.invoice_id || `INV-${invoice._id.toString().slice(-6).toUpperCase()}`,
+      created_at: invoice.created_at,
+      status: invoice.status,
+      subtotal: invoice.subtotal || 0,
+      discount: invoice.discount || 0,
+      total_amount: invoice.total_amount || 0,
+      lab: {
+        name: labName,
+        address: invoice.owner_id?.address || 'N/A',
+        phone_number: invoice.owner_id?.phone_number || 'N/A'
+      },
+      patient: {
+        name: patientName,
+        patient_id: patient.patient_id
+      },
+      tests: invoice.tests || [],
+      payments: invoice.payments || []
+    };
+
+    // Generate PDF
+    pdfPath = await generateInvoicePDF(invoiceData);
+
+    // Add PDF as attachment
+    attachments.push({
+      filename: `Invoice_${invoice.invoice_id}.pdf`,
+      path: pdfPath,
+      contentType: 'application/pdf'
+    });
+
+    console.log('✅ PDF invoice generated for email attachment');
+  } catch (pdfError) {
+    console.error('❌ Failed to generate invoice PDF:', pdfError);
+    // Continue without PDF - don't fail the notification
+  }
+
+  try {
+    const notificationResult = await sendNotification({
+      phone: patientPhone,
+      email: patientEmail,
+      whatsappMessage,
+      emailSubject,
+      emailHtml,
+      attachments
+    });
+
+    // Clean up PDF file after sending
+    if (pdfPath) {
+      setTimeout(() => cleanupPDFFile(pdfPath), 5000); // Clean up after 5 seconds
+    }
+
+    return notificationResult;
+  } catch (error) {
+    // Clean up PDF file on error
+    if (pdfPath) {
+      cleanupPDFFile(pdfPath);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -323,7 +505,7 @@ Your patient account has been created successfully.
 🔐 *Please change your password after first login for security.*
 
 📊 *Order Information:*
-• Order Barcode: ${barcode}
+${barcode ? `• Order Barcode: ${barcode}` : ''}
 • Tests Ordered: ${testCount}
 • Order Date: ${formattedDate}
 • Status: Processing
@@ -366,7 +548,7 @@ Thank you for choosing our services!`;
 
         <div style="background-color: #d1ecf1; padding: 20px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #17a2b8;">
           <h3 style="color: #17a2b8; margin-top: 0;">📊 Order Information</h3>
-          <p style="margin: 8px 0;"><strong>Order Barcode:</strong> ${barcode}</p>
+          ${barcode ? `<p style="margin: 8px 0;"><strong>Order Barcode:</strong> ${barcode}</p>` : ''}
           <p style="margin: 8px 0;"><strong>Tests Ordered:</strong> ${testCount}</p>
           <p style="margin: 8px 0;"><strong>Order Date:</strong> ${formattedDate}</p>
           <p style="margin: 8px 0;"><strong>Status:</strong> Processing</p>
@@ -642,6 +824,7 @@ ${labName} Management`;
 module.exports = {
   sendNotification,
   sendLabReport,
+  sendInvoiceReport,
   sendOrderResults,
   sendStaffDoctorActivation,
   sendAppointmentReminderNotification,

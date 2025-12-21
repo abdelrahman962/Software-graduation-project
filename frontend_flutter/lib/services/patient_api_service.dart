@@ -23,6 +23,16 @@ class PatientApiService {
     return await ApiService.put('/patient/profile', profileData);
   }
 
+  static Future<Map<String, dynamic>> changePassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
+    return await ApiService.put('/patient/change-password', {
+      'currentPassword': currentPassword,
+      'newPassword': newPassword,
+    });
+  }
+
   // Dashboard
   static Future<Map<String, dynamic>> getDashboard() async {
     return await ApiService.get('/patient/dashboard');

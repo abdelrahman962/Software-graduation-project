@@ -36,7 +36,6 @@ const orderSchema = new mongoose.Schema({
   order_date: { type: Date, default: Date.now },
   status: { type: String, enum: ['pending','processing','completed'], default: 'pending' },
   remarks: String,
-  barcode: { type: String, unique: true, sparse: true },  // Sparse allows null values, generated when sample collected
   owner_id: { type: mongoose.Schema.Types.ObjectId, ref: 'LabOwner', required: true },
   
   // Track if patient has been registered
@@ -49,47 +48,7 @@ const orderSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Remove duplicate index - unique constraint already creates an index
-// orderSchema.index({ barcode: 1 });
 
-// Helper function to generate unique barcode
-orderSchema.statics.generateUniqueBarcode = async function() {
-  let barcode;
-  let exists = true;
-  
-  while (exists) {
-    // Format: ORD-TIMESTAMP-RANDOM (e.g., ORD-1731456789000-A3B9)
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-    barcode = `ORD-${timestamp}-${random}`;
-    
-    // Check if barcode already exists
-    exists = await this.findOne({ barcode });
-  }
-  
-  return barcode;
-};
-
-// Helper function to validate and set frontend-generated barcode
-orderSchema.statics.validateAndSetBarcode = async function(orderId, frontendBarcode) {
-  // Validate barcode format
-  const barcodeRegex = /^ORD-\d{13}-[A-Z0-9]{4}$/;
-  if (!barcodeRegex.test(frontendBarcode)) {
-    throw new Error('Invalid barcode format');
-  }
-
-  // Check if barcode already exists
-  const existingOrder = await this.findOne({ barcode: frontendBarcode });
-  if (existingOrder && existingOrder._id.toString() !== orderId.toString()) {
-    throw new Error('Barcode already exists');
-  }
-
-  // Update the order with the frontend-generated barcode
-  await this.findByIdAndUpdate(orderId, { barcode: frontendBarcode });
-  return frontendBarcode;
-};
-
-// Helper function to generate registration token
 orderSchema.statics.generateRegistrationToken = function() {
   const crypto = require('crypto');
   return crypto.randomBytes(32).toString('hex');

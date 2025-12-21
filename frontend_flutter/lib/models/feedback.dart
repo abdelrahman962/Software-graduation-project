@@ -92,7 +92,7 @@ class Feedback {
       case 'test':
         return target!['test_name'] ?? 'Unknown Test';
       case 'order':
-        return 'Order ${target!['barcode'] ?? targetId}';
+        return 'Order ${target!['_id'] ?? targetId}';
       case 'system':
         return 'Medical Lab System';
       default:

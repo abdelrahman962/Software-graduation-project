@@ -95,6 +95,17 @@ router.post("/assign-test-to-me",
 );
 
 /**
+ * @route   POST /api/staff/fix-assigned-statuses
+ * @desc    Fix assigned test statuses for tests that have staff_id but wrong status
+ * @access  Private (Staff)
+ */
+router.post("/fix-assigned-statuses", 
+  authMiddleware, 
+  roleMiddleware(['Staff']), 
+  staffController.fixAssignedTestStatuses
+);
+
+/**
  * @route   GET /api/staff/orders
  * @desc    Get all orders for the staff's lab
  * @access  Private (Staff)
@@ -271,6 +282,18 @@ router.get(
 );
 
 /**
+ * @route   GET /api/staff/my-unassigned-tests
+ * @desc    Get unassigned tests for staff to assign themselves to
+ * @access  Private (Staff)
+ */
+router.get(
+  "/my-unassigned-tests",
+  authMiddleware,
+  roleMiddleware(['Staff']),
+  staffController.getMyUnassignedTests
+);
+
+/**
  * @route   POST /api/staff/assign-to-test
  * @desc    Manually assign or reassign staff to a specific test
  * @access  Private (Owner/Manager)
@@ -370,6 +393,13 @@ router.get(
   staffController.getMyFeedback
 );
 
+/**
+ * @route   GET /api/staff/doctors
+ * @desc    Get all doctors
+ * @access  Private (Staff)
+ */
+router.get('/doctors', authMiddleware, roleMiddleware(['Staff']), staffController.getAllDoctors);
+
 // ===============================
 // 📊 Results & Invoices
 // ===============================
@@ -382,11 +412,78 @@ router.get(
 router.get('/results', authMiddleware, roleMiddleware(['Staff']), staffController.getAllResults);
 
 /**
+ * @route   GET /api/staff/tests-for-upload
+ * @desc    Get tests ready for result upload
+ * @access  Private (Staff)
+ */
+router.get('/tests-for-upload', authMiddleware, roleMiddleware(['Staff']), staffController.getTestsForResultUpload);
+
+/**
  * @route   GET /api/staff/invoices
  * @desc    Get all invoices for staff's lab
  * @access  Private (Staff)
  */
 router.get('/invoices', authMiddleware, roleMiddleware(['Staff']), staffController.getAllInvoices);
+
+/**
+ * @route   GET /api/staff/orders/:orderId/results
+ * @desc    Get order results report (same as patient view)
+ * @access  Private (Staff)
+ */
+router.get('/orders/:orderId/results', authMiddleware, roleMiddleware(['Staff']), staffController.getOrderResultsReport);
+
+/**
+ * @route   GET /api/staff/invoices/:invoiceId/details
+ * @desc    Get invoice details (same as patient view)
+ * @access  Private (Staff)
+ */
+router.get('/invoices/:invoiceId/details', authMiddleware, roleMiddleware(['Staff']), staffController.getInvoiceDetails);
+
+/**
+ * @route   GET /api/staff/orders/:orderId/invoice
+ * @desc    Get invoice ID for a specific order
+ * @access  Private (Staff)
+ */
+router.get('/orders/:orderId/invoice', authMiddleware, roleMiddleware(['Staff']), staffController.getInvoiceByOrderId);
+
+/**
+ * @route   POST /api/staff/send-whatsapp
+ * @desc    Send direct WhatsApp message (for testing)
+ * @access  Private (Staff)
+ */
+router.post('/send-whatsapp', authMiddleware, roleMiddleware(['Staff']), async (req, res) => {
+  try {
+    const { phone_number, message } = req.body;
+
+    if (!phone_number || !message) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number and message are required'
+      });
+    }
+
+    const { sendWhatsAppMessage } = require('../utils/sendWhatsApp');
+    const success = await sendWhatsAppMessage(phone_number, message);
+
+    if (success) {
+      res.json({
+        success: true,
+        message: 'WhatsApp message sent successfully'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to send WhatsApp message'
+      });
+    }
+  } catch (error) {
+    console.error('Error sending WhatsApp message:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
 
 // ===============================
 // ✅ Export Router

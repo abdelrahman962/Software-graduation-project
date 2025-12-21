@@ -246,7 +246,6 @@ exports.getUnpaidInvoices = async (req, res) => {
       summary,
       invoices: unpaidInvoices.map(inv => ({
         invoice_id: inv._id,
-        order_barcode: inv.order_id?.barcode,
         patient_name: inv.order_id?.patient_id 
           ? `${inv.order_id.patient_id.full_name.first} ${inv.order_id.patient_id.full_name.last}`
           : 'Unknown',
@@ -264,5 +263,95 @@ exports.getUnpaidInvoices = async (req, res) => {
   } catch (err) {
     console.error("Error fetching unpaid invoices:", err);
     res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Send Invoice Report to Patient
+ * @route   POST /api/invoice/send-report/:invoiceId
+ * @access  Private (Staff/Owner)
+ */
+exports.sendInvoiceReport = async (req, res) => {
+  try {
+    const { invoiceId } = req.params;
+
+    // Find invoice with populated data
+    const invoice = await Invoice.findById(invoiceId)
+      .populate({
+        path: 'order_id',
+        populate: {
+          path: 'patient_id',
+          select: 'full_name patient_id phone_number email'
+        }
+      })
+      .populate('owner_id', 'lab_name address phone_number')
+      .populate({
+        path: 'tests.test_id',
+        select: 'test_name price'
+      });
+
+    if (!invoice) {
+      return res.status(404).json({ message: "Invoice not found" });
+    }
+
+    if (!invoice.order_id?.patient_id) {
+      return res.status(400).json({ message: "Patient information not found for this invoice" });
+    }
+
+    const patient = invoice.order_id.patient_id;
+    const labName = invoice.owner_id?.lab_name || 'Medical Lab';
+
+    // Create invoice URL for online viewing
+    const invoiceUrl = `${process.env.FRONTEND_URL || 'http://localhost:8080'}/patient-dashboard/invoice/${invoice._id}`;
+
+    // Prepare invoice data for PDF generation
+    const invoiceData = {
+      invoice_id: invoice.invoice_id,
+      created_at: invoice.created_at,
+      status: invoice.status,
+      subtotal: invoice.subtotal || 0,
+      discount: invoice.discount || 0,
+      total_amount: invoice.total_amount || 0,
+      lab: {
+        name: labName,
+        address: invoice.owner_id?.address || 'N/A',
+        phone_number: invoice.owner_id?.phone_number || 'N/A'
+      },
+      patient: {
+        name: `${patient.full_name?.first || ''} ${patient.full_name?.last || ''}`.trim(),
+        patient_id: patient.patient_id
+      },
+      tests: invoice.tests?.map(test => ({
+        test_name: test.test_id?.test_name || 'Unknown Test',
+        price: test.price || 0,
+        quantity: test.quantity || 1
+      })) || [],
+      payments: invoice.payments || []
+    };
+
+    // Import the notification utility
+    const { sendInvoiceReport: sendInvoiceNotification } = require('../utils/sendNotification');
+
+    // Send the invoice report
+    const notificationResult = await sendInvoiceNotification(
+      patient,
+      invoiceData,
+      invoiceUrl,
+      labName
+    );
+
+    // Log the action
+    const Staff = require('../models/Staff');
+    const loggingStaff = await Staff.findById(req.user?._id).select('username');
+    await logAction(req.user?._id, loggingStaff.username, `Sent invoice report ${invoice.invoice_id} to patient ${patient.full_name?.first} ${patient.full_name?.last}`);
+
+    res.json({
+      message: "Invoice report sent successfully",
+      notification: notificationResult
+    });
+
+  } catch (error) {
+    console.error("Error sending invoice report:", error);
+    res.status(500).json({ message: error.message });
   }
 };

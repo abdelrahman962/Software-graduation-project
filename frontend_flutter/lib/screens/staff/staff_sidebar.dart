@@ -62,7 +62,12 @@ class StaffSidebar extends StatelessWidget {
                     _buildNavItem(context, 'Dashboard', Icons.dashboard, 0),
                     _buildNavItem(context, 'New Order', Icons.add_box, 1),
                     _buildNavItem(context, 'Orders', Icons.assignment, 2),
-                    _buildNavItem(context, 'Lab Tests', Icons.science, 3),
+                    _buildNavItem(
+                      context,
+                      'My Tests',
+                      Icons.assignment_turned_in,
+                      3,
+                    ),
                     _buildNavItem(
                       context,
                       'Sample Collection',
@@ -140,11 +145,16 @@ class StaffSidebar extends StatelessWidget {
     IconData icon,
     int index, {
     VoidCallback? onTap,
+    bool isSpecial = false,
   }) {
     final isSelected = selectedIndex == index;
 
     return InkWell(
-      onTap: onTap ?? () => onItemSelected(index),
+      onTap:
+          onTap ??
+          () {
+            onItemSelected(index);
+          },
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

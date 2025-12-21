@@ -182,6 +182,18 @@ router.get('/invoices/:invoiceId',
   validateRequest, 
   patientController.getInvoiceById
 );
+/**
+ * @route   POST /api/patient/invoices/:invoiceId/send-report
+ * @desc    Request invoice report via email and WhatsApp
+ * @access  Private (Patient)
+ */
+router.post('/invoices/:invoiceId/send-report', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  ...patientValidator.validateInvoiceId, 
+  validateRequest, 
+  patientController.requestInvoiceReport
+);
 
 // ==================== LABS & TESTS & DOCTORS ROUTES ====================
 

@@ -145,10 +145,10 @@ class _StaffFeedbackScreenState extends State<StaffFeedbackScreen>
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  '• Suggest process improvements and efficiency gains\n'
-                  '• Report equipment or facility issues\n'
-                  '• Share ideas for better patient experience\n'
-                  '• Help maintain quality standards and compliance',
+                  '- Suggest process improvements and efficiency gains\n'
+                  '- Report equipment or facility issues\n'
+                  '- Share ideas for better patient experience\n'
+                  '- Help maintain quality standards and compliance',
                   style: TextStyle(fontSize: 14, height: 1.4),
                 ),
               ],

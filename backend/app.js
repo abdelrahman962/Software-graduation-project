@@ -27,7 +27,7 @@ const cors = require('cors');
 
 app.use(helmet()); // Add security headers
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', /^http:\/\/localhost:\d+$/],
+  origin: ['http://localhost:5173', 'http://localhost:3000', /^http:\/\/localhost:\d+$/, /^http:\/\/192\.168\.1\.\d+:\d+$/, 'http://localhost:8080', 'http://127.0.0.1:8080'],
   credentials: true
 }));
 

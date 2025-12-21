@@ -1876,8 +1876,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                   'Total Cost',
                   'ILS ${order['total_cost'].toStringAsFixed(2)}',
                 ),
-              if (order['barcode'] != null)
-                _buildDetailRow('Barcode', order['barcode'].toString()),
               const SizedBox(height: 16),
               const Text(
                 'Test Details:',
@@ -4681,13 +4679,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                                 : 'N/A',
                             Colors.blue,
                           ),
-                          if (order['barcode'] != null)
-                            _buildInfoTile(
-                              Icons.qr_code_2,
-                              'Barcode',
-                              order['barcode'],
-                              Colors.purple,
-                            ),
                         ],
                       ),
 

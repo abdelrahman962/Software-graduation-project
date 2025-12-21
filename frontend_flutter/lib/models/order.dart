@@ -3,7 +3,6 @@ class Order {
   final String? patientId;
   final String? doctorId;
   final String ownerId;
-  final String? barcode;
   final String status;
   final DateTime orderDate;
   final List<String> tests;
@@ -19,7 +18,6 @@ class Order {
     this.patientId,
     this.doctorId,
     required this.ownerId,
-    this.barcode,
     this.status = 'pending',
     required this.orderDate,
     this.tests = const [],
@@ -43,7 +41,6 @@ class Order {
       ownerId: json['owner_id'] is Map
           ? json['owner_id']['_id']
           : json['owner_id'] ?? '',
-      barcode: json['barcode'],
       status: json['status'] ?? 'pending',
       orderDate: json['order_date'] != null
           ? DateTime.parse(json['order_date'])
@@ -72,7 +69,6 @@ class Order {
       if (patientId != null) 'patient_id': patientId,
       if (doctorId != null) 'doctor_id': doctorId,
       'owner_id': ownerId,
-      if (barcode != null) 'barcode': barcode,
       'status': status,
       'order_date': orderDate.toIso8601String(),
       'tests': tests,

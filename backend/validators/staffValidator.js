@@ -19,16 +19,46 @@ exports.validateUploadResult = [
     .trim()
     .notEmpty().withMessage('Detail ID is required')
     .isMongoId().withMessage('Invalid detail ID format'),
-  
+
+  // result_value is required only for tests without components
   body('result_value')
+    .optional()
     .trim()
-    .notEmpty().withMessage('Result value is required')
     .isLength({ max: 500 }).withMessage('Result value too long'),
-  
+
+  // components is required for tests with components
+  body('components')
+    .optional()
+    .isArray().withMessage('Components must be an array'),
+
+  body('components.*.component_id')
+    .optional()
+    .isMongoId().withMessage('Invalid component ID format'),
+
+  body('components.*.component_value')
+    .optional()
+    .trim()
+    .notEmpty().withMessage('Component value cannot be empty'),
+
   body('remarks')
     .optional()
     .trim()
-    .isLength({ max: 500 }).withMessage('Remarks too long')
+    .isLength({ max: 500 }).withMessage('Remarks too long'),
+
+  // Custom validation: either result_value OR components must be provided
+  body().custom((value, { req }) => {
+    const { result_value, components } = req.body;
+
+    if (!result_value && (!components || !Array.isArray(components) || components.length === 0)) {
+      throw new Error('Either result_value or components must be provided');
+    }
+
+    if (result_value && components && components.length > 0) {
+      throw new Error('Cannot provide both result_value and components');
+    }
+
+    return true;
+  })
 ];
 
 // Collect Sample Validation

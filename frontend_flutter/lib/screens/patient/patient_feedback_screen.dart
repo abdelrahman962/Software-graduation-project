@@ -130,9 +130,9 @@ class _PatientFeedbackScreenState extends State<PatientFeedbackScreen>
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  '• Your feedback is valuable and helps improve our services\n'
-                  '• You can choose to submit feedback anonymously\n'
-                  '• All feedback is reviewed and taken seriously',
+                  '- Your feedback is valuable and helps improve our services\n'
+                  '- You can choose to submit feedback anonymously\n'
+                  '- All feedback is reviewed and taken seriously',
                   style: TextStyle(fontSize: 14, height: 1.4),
                 ),
               ],

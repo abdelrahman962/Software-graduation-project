@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const invoiceSchema = new mongoose.Schema({
+  invoice_id: { type: String, unique: true },
   order_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Orders' },
   invoice_date: { type: Date, default: Date.now },
   subtotal: Number,
@@ -14,7 +15,7 @@ const invoiceSchema = new mongoose.Schema({
   remarks: String,
   owner_id: { type: mongoose.Schema.Types.ObjectId, ref: 'LabOwner' },
   items: [{
-    test_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Test' },
+    test_id: { type: mongoose.Schema.Types.ObjectId, ref: 'TestManagement' },
     test_name: String,
     price: Number,
     quantity: { type: Number, default: 1 }

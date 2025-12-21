@@ -56,6 +56,11 @@ class StaffApiService {
     return await ApiService.get('/staff/lab-tests');
   }
 
+  // Get unassigned tests for staff to assign themselves to
+  static Future<Map<String, dynamic>> getMyUnassignedTests() async {
+    return await ApiService.get('/staff/my-unassigned-tests');
+  }
+
   // Assign staff to a specific test
   static Future<Map<String, dynamic>> assignToTest({
     required String detailId,
@@ -69,14 +74,16 @@ class StaffApiService {
   static Future<Map<String, dynamic>> createWalkInOrder({
     required Map<String, dynamic> patientInfo,
     required List<String> testIds,
+    String? doctorId,
   }) async {
     return await ApiService.post('/staff/create-walk-in-order', {
       'patient_info': patientInfo,
       'test_ids': testIds,
+      if (doctorId != null) 'doctor_id': doctorId,
     });
   }
 
-  // Get pending orders for barcode generation
+  // Get pending orders
   static Future<Map<String, dynamic>> getPendingOrders() async {
     return await ApiService.get('/staff/pending-orders');
   }
@@ -88,6 +95,9 @@ class StaffApiService {
     String? startDate,
     String? endDate,
   }) async {
+    print(
+      '🔍 DEBUG: API getAllLabOrders called with status: $status, patientId: $patientId, startDate: $startDate, endDate: $endDate',
+    );
     var url = '/staff/orders';
     final params = <String>[];
 
@@ -100,7 +110,10 @@ class StaffApiService {
       url += '?${params.join('&')}';
     }
 
-    return await ApiService.get(url);
+    print('🔍 DEBUG: API getAllLabOrders - final URL: $url');
+    final result = await ApiService.get(url);
+    print('🔍 DEBUG: API getAllLabOrders - result: $result');
+    return result;
   }
 
   // Sample Collection
@@ -128,12 +141,22 @@ class StaffApiService {
     List<Map<String, dynamic>>? components,
     String? remarks,
   }) async {
-    return await ApiService.post('/staff/upload-result', {
+    print('🔍 API SERVICE DEBUG: uploadResult called with:');
+    print('🔍 API SERVICE DEBUG: detailId: $detailId');
+    print('🔍 API SERVICE DEBUG: resultValue: $resultValue');
+    print('🔍 API SERVICE DEBUG: components: $components');
+    print('🔍 API SERVICE DEBUG: remarks: $remarks');
+
+    final requestData = {
       'detail_id': detailId,
       if (resultValue != null) 'result_value': resultValue,
       if (components != null) 'components': components,
       if (remarks != null) 'remarks': remarks,
-    });
+    };
+
+    print('🔍 API SERVICE DEBUG: Sending request data: $requestData');
+
+    return await ApiService.post('/staff/upload-result', requestData);
   }
 
   // Get test components (for multi-component tests)
@@ -242,6 +265,23 @@ class StaffApiService {
     return await ApiService.get('/staff/results', params: queryParams);
   }
 
+  // Get tests ready for result upload
+  static Future<Map<String, dynamic>> getTestsForResultUpload({
+    int page = 1,
+    int limit = 50,
+    String? patientName,
+    String? testName,
+  }) async {
+    final queryParams = <String, String>{};
+    queryParams['page'] = page.toString();
+    queryParams['limit'] = limit.toString();
+
+    if (patientName != null) queryParams['patientName'] = patientName;
+    if (testName != null) queryParams['testName'] = testName;
+
+    return await ApiService.get('/staff/tests-for-upload', params: queryParams);
+  }
+
   static Future<Map<String, dynamic>> getAllInvoices({
     int page = 1,
     int limit = 50,
@@ -262,10 +302,50 @@ class StaffApiService {
     return await ApiService.get('/staff/invoices', params: queryParams);
   }
 
+  // Get order results report (same as patient view)
+  static Future<Map<String, dynamic>> getOrderResultsReport(
+    String orderId,
+  ) async {
+    print('🔍 DEBUG: API call - getOrderResultsReport for orderId: $orderId');
+    return await ApiService.get('/staff/orders/$orderId/results');
+  }
+
+  // Get invoice details (same as patient view)
+  static Future<Map<String, dynamic>> getInvoiceDetails(
+    String invoiceId,
+  ) async {
+    print('🔍 DEBUG: API call - getInvoiceDetails for invoiceId: $invoiceId');
+    return await ApiService.get('/staff/invoices/$invoiceId/details');
+  }
+
+  // Get invoice by order ID
+  static Future<Map<String, dynamic>> getInvoiceByOrderId(
+    String orderId,
+  ) async {
+    print('🔍 DEBUG: API call - getInvoiceByOrderId for orderId: $orderId');
+    return await ApiService.get('/staff/orders/$orderId/invoice');
+  }
+
   // Test Assignment
   static Future<Map<String, dynamic>> assignTestToMe(String detailId) async {
     return await ApiService.post('/staff/assign-test-to-me', {
       'detail_id': detailId,
+    });
+  }
+
+  // Get doctors for the lab
+  static Future<Map<String, dynamic>> getLabDoctors() async {
+    return await ApiService.get('/staff/doctors');
+  }
+
+  // WhatsApp Direct Messaging
+  static Future<Map<String, dynamic>> sendWhatsAppMessage(
+    String phoneNumber,
+    String message,
+  ) async {
+    return await ApiService.post('/staff/send-whatsapp', {
+      'phone_number': phoneNumber,
+      'message': message,
     });
   }
 }
