@@ -17,9 +17,12 @@ import '../../widgets/system_feedback_form.dart';
 import '../../widgets/new_order_form.dart';
 import 'staff_order_results_screen.dart';
 import 'staff_invoice_details_screen.dart';
+import 'staff_profile_screen.dart';
 
 class StaffDashboardScreen extends StatefulWidget {
-  const StaffDashboardScreen({super.key});
+  const StaffDashboardScreen({super.key, this.initialTab});
+
+  final String? initialTab;
 
   @override
   State<StaffDashboardScreen> createState() => _StaffDashboardScreenState();
@@ -38,7 +41,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
   // Orders data
   Map<String, dynamic>? _allOrders;
   bool _isAllOrdersLoading = false;
-  String? _selectedStatus;
+  String? _selectedStatus; // Default to showing all tests
   String? _selectedDeviceId;
   late TabController _tabController;
   String _inventorySearchQuery = '';
@@ -49,12 +52,8 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
   bool _hasFeedbackSubmitted = false;
   bool _showFeedbackReminder = true;
 
-  // Current staff info
-  String? _currentStaffId;
-
-  // Controllers for result upload
-  final TextEditingController _resultController = TextEditingController();
-  final TextEditingController _remarksController = TextEditingController();
+  // Scaffold key for drawer management
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // Search for results
   String _resultSearchQuery = '';
@@ -62,10 +61,48 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
   // Search for samples
   String _sampleSearchQuery = '';
 
+  // Tab routes for URL navigation
+  static const Map<int, String> _tabRoutes = {
+    0: 'dashboard',
+    1: 'new-order',
+    2: 'orders',
+    3: 'my-tests',
+    4: 'sample-collection',
+    5: 'result-upload',
+    6: 'inventory',
+    7: 'notifications',
+    8: 'profile',
+  };
+
+  // Reverse map for getting index from tab name
+  static const Map<String, int> _tabIndices = {
+    'dashboard': 0,
+    'new-order': 1,
+    'orders': 2,
+    'my-tests': 3,
+    'sample-collection': 4,
+    'result-upload': 5,
+    'inventory': 6,
+    'notifications': 7,
+    'profile': 8,
+  };
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 9, vsync: this);
+
+    // Set initial tab based on URL parameter
+    final initialIndex = widget.initialTab != null
+        ? _tabIndices[widget.initialTab] ?? 0
+        : 0;
+
+    _tabController = TabController(
+      length: 9,
+      vsync: this,
+      initialIndex: initialIndex,
+    );
+    _selectedIndex = initialIndex;
+
     _tabController.addListener(_handleTabChange);
     _loadInitialData();
     _checkFeedbackStatus();
@@ -100,16 +137,27 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
 
   // Load only the first tab's data initially
   Future<void> _loadInitialData() async {
-    // Get current staff ID from auth provider
-    final authProvider = Provider.of<StaffAuthProvider>(context, listen: false);
-    _currentStaffId = authProvider.user?.id;
-
     // Load initial data for dashboard and orders
     await Future.wait([_loadAssignedTests(), _loadAllOrders()]);
   }
 
   // Handle tab changes to load data on demand
   void _handleTabChange() {
+    // Update URL when tab changes
+    final tabRoute = _tabRoutes[_tabController.index];
+    if (tabRoute != null) {
+      final targetPath = '/staff/dashboard/$tabRoute';
+      final currentPath = GoRouter.of(
+        context,
+      ).routerDelegate.currentConfiguration.uri.path;
+      if (currentPath != targetPath) {
+        GoRouter.of(context).go(targetPath);
+      }
+    }
+
+    // Sync selectedIndex with tab controller
+    setState(() => _selectedIndex = _tabController.index);
+
     if (_tabController.index == 1 &&
         _pendingOrders == null &&
         !_isOrdersLoading) {
@@ -123,8 +171,11 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     setState(() => _isTestsLoading = true);
 
     try {
+      // For sample collection view, always load all tests to ensure assigned tests are available
+      final statusFilter = _selectedIndex == 4 ? null : _selectedStatus;
+
       final response = await StaffApiService.getMyAssignedTests(
-        statusFilter: _selectedStatus,
+        statusFilter: statusFilter,
         deviceId: _selectedDeviceId,
       );
 
@@ -181,8 +232,8 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
           _allOrders = response;
         });
       }
-      // Also refresh tests for upload
-      await _loadResultsForUpload();
+      // Also refresh tests for upload and assigned tests
+      await Future.wait([_loadResultsForUpload(), _loadAssignedTests()]);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -204,6 +255,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
       final response = await StaffApiService.getTestsForResultUpload(
         limit: 100, // Get more tests
       );
+
       if (mounted) {
         setState(() {
           _allResultsForUpload = response;
@@ -233,8 +285,8 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
           _allOrders = response;
         });
       }
-      // Also refresh tests for upload
-      await _loadResultsForUpload();
+      // Also refresh tests for upload and assigned tests
+      await Future.wait([_loadResultsForUpload(), _loadAssignedTests()]);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -685,8 +737,12 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
               backgroundColor: AppTheme.successGreen,
             ),
           );
-          // Refresh orders to show updated status
-          _loadOrdersInBackground();
+          // Remove the test from the sample collection list with animation
+          _removeSampleFromCollectionList(detailId);
+          // Refresh all data to show updated status across all tabs
+          await _loadOrdersInBackground();
+          // Force UI update
+          setState(() {});
         }
       } else {
         if (mounted) {
@@ -711,45 +767,132 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
   }
 
   Future<void> _showUploadResultDialog(Map<String, dynamic> test) async {
-    // For tests from getTestsForResultUpload API, they're always assigned
-    // For tests from other sources, check assignment status
-    final assignedTo = test['assigned_to'];
-    final isAssigned = assignedTo != null;
-    final detailId = test['detail_id']?.toString();
-
-    print(
-      '🔍 FRONTEND DEBUG: _showUploadResultDialog called for test: ${test['test_name']}',
-    );
-    print('🔍 FRONTEND DEBUG: assigned_to value: $assignedTo');
-    print('🔍 FRONTEND DEBUG: assigned_to type: ${assignedTo?.runtimeType}');
-    print('🔍 FRONTEND DEBUG: isAssigned: $isAssigned, detailId: $detailId');
-
-    // If this is from the "Results for Upload" section, skip assignment check
-    // since getTestsForResultUpload only returns assigned tests
-    final isFromResultsUpload =
-        _allResultsForUpload?['tests']?.any(
-          (t) => t['detail_id'] == test['detail_id'],
-        ) ??
-        false;
-
-    if (!isFromResultsUpload && !isAssigned) {
-      print(
-        '🔍 FRONTEND DEBUG: Test not assigned, showing assignment required message',
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Please assign this test to yourself first before uploading results',
+    // Show initial dialog with two options
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.upload_file, color: Colors.blue),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Upload Result', style: TextStyle(fontSize: 18)),
+                  Text(
+                    test['test_name'] as String? ?? 'Unknown Test',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.normal,
+                      color: Colors.grey,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 5),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Choose how you want to upload the result:',
+              style: TextStyle(fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () => Navigator.pop(context, 'manual'),
+                    child: const Card(
+                      elevation: 2,
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Column(
+                          children: [
+                            Icon(Icons.edit, color: Colors.blue, size: 32),
+                            SizedBox(height: 8),
+                            Text(
+                              'Manual Entry',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Enter result values manually',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: InkWell(
+                    onTap: () => Navigator.pop(context, 'hl7'),
+                    child: const Card(
+                      elevation: 2,
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Column(
+                          children: [
+                            Icon(Icons.science, color: Colors.green, size: 32),
+                            SizedBox(height: 8),
+                            Text(
+                              'HL7 Simulation',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Run automated test simulation',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
           ),
-        );
-      }
-      return;
-    }
+        ],
+      ),
+    );
 
+    if (result == null) return;
+
+    if (result == 'manual') {
+      await _showManualResultEntry(test);
+    } else if (result == 'hl7') {
+      await _runHL7Simulation(test);
+    }
+  }
+
+  Future<void> _showManualResultEntry(Map<String, dynamic> test) async {
     // First, check if this test has components
     bool isLoadingComponents = true;
     List<Map<String, dynamic>> components = [];
@@ -825,7 +968,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Upload Result',
+                        'Manual Result Entry',
                         style: TextStyle(fontSize: 18),
                       ),
                       Text(
@@ -1067,7 +1210,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                                 content: Text(
                                   'Please enter values for all components',
                                 ),
-                                backgroundColor: AppTheme.errorRed,
+                                backgroundColor: Colors.red,
                               ),
                             );
                             return;
@@ -1078,7 +1221,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text('Please enter a result value'),
-                                backgroundColor: AppTheme.errorRed,
+                                backgroundColor: Colors.red,
                               ),
                             );
                             return;
@@ -1128,17 +1271,20 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                             if (response['success'] != false) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text(
-                                    response['urgent'] == true
-                                        ? 'WARNING: Result uploaded - Marked as URGENT'
-                                        : 'Result uploaded successfully',
-                                  ),
-                                  backgroundColor: response['urgent'] == true
-                                      ? Colors.orange
-                                      : AppTheme.successGreen,
+                                  content: Text('Result uploaded successfully'),
+                                  backgroundColor: Colors.green,
                                 ),
                               );
-                              _loadAssignedTests();
+                              _removeTestFromList(
+                                test['detail_id']?.toString(),
+                              );
+                              // Reset status filter to show all tests including completed
+                              setState(() => _selectedStatus = null);
+                              // Refresh all data
+                              await Future.wait([
+                                _loadResultsForUpload(),
+                                _loadAssignedTests(),
+                              ]);
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
@@ -1146,7 +1292,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                                     response['message'] ??
                                         'Failed to upload result',
                                   ),
-                                  backgroundColor: AppTheme.errorRed,
+                                  backgroundColor: Colors.red,
                                 ),
                               );
                             }
@@ -1165,17 +1311,20 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                             if (response['success'] != false) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text(
-                                    response['urgent'] == true
-                                        ? 'WARNING: Result uploaded - Marked as URGENT'
-                                        : 'Result uploaded successfully',
-                                  ),
-                                  backgroundColor: response['urgent'] == true
-                                      ? Colors.orange
-                                      : AppTheme.successGreen,
+                                  content: Text('Result uploaded successfully'),
+                                  backgroundColor: Colors.green,
                                 ),
                               );
-                              _loadAssignedTests();
+                              _removeTestFromList(
+                                test['detail_id']?.toString(),
+                              );
+                              // Reset status filter to show all tests including completed
+                              setState(() => _selectedStatus = null);
+                              // Refresh all data
+                              await Future.wait([
+                                _loadResultsForUpload(),
+                                _loadAssignedTests(),
+                              ]);
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
@@ -1183,7 +1332,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                                     response['message'] ??
                                         'Failed to upload result',
                                   ),
-                                  backgroundColor: AppTheme.errorRed,
+                                  backgroundColor: Colors.red,
                                 ),
                               );
                             }
@@ -1199,30 +1348,281 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     );
   }
 
+  Future<void> _runHL7Simulation(Map<String, dynamic> test) async {
+    final detailId = test['detail_id']?.toString() ?? '';
+
+    // print('🎯 FRONTEND SIMULATION START: _runHL7Simulation called');
+    // print('📨 FRONTEND: detailId = $detailId');
+    // print('📊 FRONTEND: test data = $test');
+
+    if (detailId.isEmpty) {
+      // print('❌ FRONTEND SIMULATION ERROR: Test detail ID is missing');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Test detail ID is missing'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Running HL7 simulation...'),
+            SizedBox(height: 8),
+            Text(
+              'This will simulate automated lab equipment processing',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      // Call the new run-test API
+      final response = await StaffApiService.runTest(
+        detailId: detailId,
+        priority: 'normal',
+      );
+
+      // Check for random_result specifically
+      final randomResult = response['random_result'];
+      if (randomResult != null) {
+        // Process random result data
+      }
+
+      if (context.mounted) {
+        Navigator.pop(context); // Close loading dialog
+
+        if (response['success'] != false && randomResult != null) {
+          // Show dialog to review and save results
+          await _showSimulationResultsDialog(test, randomResult);
+        } else {
+          // print('🚨 FRONTEND: Response message: ${response['message']}');
+          // print('🚨 FRONTEND: Response success: ${response['success']}');
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                response['message'] ??
+                    'Failed to start HL7 simulation - no results generated',
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (error) {
+      // print('💥 FRONTEND SIMULATION ERROR: Exception caught during API call');
+      // print('📊 FRONTEND: Error type: ${error.runtimeType}');
+      // print('📊 FRONTEND: Error message: ${error.toString()}');
+
+      if (context.mounted) {
+        Navigator.pop(context); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${error.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+    // print('🎉 FRONTEND SIMULATION END: _runHL7Simulation function completed');
+  }
+
+  // New method to show simulation results for review and saving
+  Future<void> _showSimulationResultsDialog(
+    Map<String, dynamic> test,
+    Map<String, dynamic> randomResult,
+  ) async {
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.preview, color: AppTheme.primaryBlue),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Review Simulation Results',
+                style: const TextStyle(fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Test: ${test['test_name'] ?? 'Unknown'}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              // Reuse result display logic
+              _buildResultDisplay({'result': randomResult}),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context); // Close dialog
+              // Save the results using existing upload logic
+              await _saveSimulationResults(test, randomResult);
+            },
+            child: const Text('Save Results'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // New method to save simulation results
+  Future<void> _saveSimulationResults(
+    Map<String, dynamic> test,
+    Map<String, dynamic> randomResult,
+  ) async {
+    // print('💾 FRONTEND SAVE START: _saveSimulationResults called');
+    // print('📋 FRONTEND: Test data: $test');
+    // print('📊 FRONTEND: Random result: $randomResult');
+
+    try {
+      final detailId = test['detail_id']?.toString() ?? '';
+      // print('🆔 FRONTEND: Detail ID: $detailId');
+
+      if (detailId.isEmpty) {
+        // print('❌ FRONTEND SAVE ERROR: Test detail ID is missing');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Test detail ID is missing'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // print('📝 FRONTEND SAVE STEP 1: Preparing data for uploadResult API');
+
+      // Prepare data for uploadResult API
+      String resultValue = '';
+      List<Map<String, dynamic>> components = [];
+      if (randomResult['has_components'] == true) {
+        components = List<Map<String, dynamic>>.from(
+          randomResult['components'] ?? [],
+        );
+        // print(
+        //   '🧬 FRONTEND: Multi-component test with ${components.length} components',
+        // );
+      } else {
+        resultValue = randomResult['result_value'] ?? '';
+        // print('🔬 FRONTEND: Single-value test with result: $resultValue');
+      }
+
+      // print(
+      //   '🌐 FRONTEND SAVE STEP 2: Calling StaffApiService.uploadResult API',
+      // );
+      // print(
+      //   '📤 FRONTEND: API payload - detailId: $detailId, resultValue: $resultValue, components count: ${components.length}',
+      // );
+
+      final response = await StaffApiService.uploadResult(
+        detailId: detailId,
+        resultValue: resultValue,
+        components: components.isNotEmpty ? components : null,
+        remarks: randomResult['remarks'] ?? 'Generated via simulation',
+      );
+
+      // print('📡 FRONTEND SAVE STEP 3: Received upload response');
+      // print('📊 FRONTEND: Upload response: $response');
+
+      if (response['success'] == true) {
+        // print(
+        //   '✅ FRONTEND SAVE SUCCESS: Results saved successfully to database',
+        // );
+        // print('🔄 FRONTEND: Refreshing assigned tests data');
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(response['message'] ?? 'Results saved successfully'),
+            backgroundColor: AppTheme.successGreen,
+          ),
+        );
+        // Remove the test from the local list with animation
+        _removeTestFromList(detailId);
+        // Reset status filter to show all tests including completed
+        setState(() => _selectedStatus = null);
+        // Refresh all data
+        await Future.wait([_loadResultsForUpload(), _loadAssignedTests()]);
+      } else {
+        // print('❌ FRONTEND SAVE FAILED: API returned success=false');
+        // print('🚨 FRONTEND: Error message: ${response['message']}');
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(response['message'] ?? 'Failed to save results'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      // print('💥 FRONTEND SAVE ERROR: Exception during save operation');
+      // print('📊 FRONTEND: Error details: $e');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error saving results: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+    // print('🎉 FRONTEND SAVE END: _saveSimulationResults completed');
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<StaffAuthProvider>(context);
-    final isMobile = MediaQuery.of(context).size.width < 1024;
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    final showSidebar = MediaQuery.of(context).size.width >= 600;
     final screenWidth = MediaQuery.of(context).size.width;
+
+    // Show loading while auth state is being determined
+    if (authProvider.token == null && authProvider.user == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     if (!authProvider.isAuthenticated) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        context.go('/staff/login');
+        context.go('/login');
       });
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
+      key: _scaffoldKey,
       appBar: isMobile
           ? AppBar(
               backgroundColor: Theme.of(context).colorScheme.surface,
               elevation: 0,
-              leading: Builder(
-                builder: (context) => IconButton(
-                  icon: const Icon(Icons.menu),
-                  onPressed: () => Scaffold.of(context).openDrawer(),
-                  tooltip: 'Open menu',
-                ),
+              leading: IconButton(
+                icon: const Icon(Icons.menu),
+                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                tooltip: 'Open menu',
               ),
               title: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1253,17 +1653,21 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
           : AppBar(
               backgroundColor: Theme.of(context).colorScheme.surface,
               elevation: 0,
-              leading: IconButton(
-                icon: AnimatedIcon(
-                  icon: AnimatedIcons.menu_close,
-                  progress: _isSidebarOpen
-                      ? const AlwaysStoppedAnimation(1.0)
-                      : const AlwaysStoppedAnimation(0.0),
-                ),
-                onPressed: () =>
-                    setState(() => _isSidebarOpen = !_isSidebarOpen),
-                tooltip: _isSidebarOpen ? 'Close sidebar' : 'Open sidebar',
-              ),
+              leading: showSidebar
+                  ? IconButton(
+                      icon: AnimatedIcon(
+                        icon: AnimatedIcons.menu_close,
+                        progress: _isSidebarOpen
+                            ? const AlwaysStoppedAnimation(1.0)
+                            : const AlwaysStoppedAnimation(0.0),
+                      ),
+                      onPressed: () =>
+                          setState(() => _isSidebarOpen = !_isSidebarOpen),
+                      tooltip: _isSidebarOpen
+                          ? 'Close sidebar'
+                          : 'Open sidebar',
+                    )
+                  : null,
               title: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1319,17 +1723,12 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                 const SizedBox(width: 16),
               ],
             ),
-      drawer: isMobile
-          ? Builder(
-              builder: (context) =>
-                  AppAnimations.slideInFromLeft(_buildDrawer()),
-            )
-          : null,
+      drawer: isMobile ? _buildDrawer() : null,
       body: Stack(
         children: [
           Row(
             children: [
-              if (!isMobile && _isSidebarOpen)
+              if (showSidebar && _isSidebarOpen)
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
                   width: 280,
@@ -1432,6 +1831,8 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
         return _buildInventoryView();
       case 7:
         return _buildNotificationsView();
+      case 8:
+        return const StaffProfileScreen();
       default:
         return _buildDashboardView();
     }
@@ -1558,17 +1959,10 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
           selectedTileColor: AppTheme.primaryBlue.withValues(alpha: 0.1),
           onTap: () async {
             if (isLogout) {
-              final authProvider = Provider.of<StaffAuthProvider>(
-                context,
-                listen: false,
-              );
-              await authProvider.logout();
-              if (context.mounted) {
-                context.go('/');
-              }
+              _showLogoutDialog();
             } else {
               setState(() => _selectedIndex = index);
-              Navigator.pop(context); // Close drawer
+              _scaffoldKey.currentState?.closeDrawer(); // Close drawer
             }
           },
         ),
@@ -1579,6 +1973,17 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
   void _handleSidebarNavigation(int index) {
     setState(() => _selectedIndex = index);
 
+    // Update tab controller to match sidebar selection
+    if (index >= 0 && index < _tabController.length) {
+      _tabController.animateTo(index);
+    }
+
+    // Update URL for sidebar navigation
+    final tabRoute = _tabRoutes[index];
+    if (tabRoute != null) {
+      GoRouter.of(context).go('/staff/dashboard/$tabRoute');
+    }
+
     // Load data for specific tabs when selected
     switch (index) {
       case 2: // Orders tab
@@ -1586,12 +1991,334 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
           _loadAllOrders();
         }
         break;
+      case 4: // Sample Collection tab
+        // Always reload assigned tests for sample collection to ensure we have assigned tests
+        _loadAssignedTests();
+        break;
       // Add other cases as needed
     }
   }
 
   Widget _buildNotificationsView() {
-    return const Center(child: Text('Notifications view coming soon'));
+    final authProvider = Provider.of<StaffAuthProvider>(context);
+    final staffId = authProvider.user?.id ?? '';
+
+    if (staffId.isEmpty) {
+      return const Center(
+        child: Text('Unable to load notifications - staff ID not found'),
+      );
+    }
+
+    return FutureBuilder(
+      future: StaffApiService.getNotifications(staffId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(50),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(50),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                  const SizedBox(height: 16),
+                  Text('Error loading notifications: ${snapshot.error}'),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => setState(() {}),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        final notifications = snapshot.data as List? ?? [];
+
+        return AppAnimations.pageDepthTransition(
+          SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Notifications',
+                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'View your recent notifications and updates',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyLarge?.copyWith(color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Text(
+                      'Total Notifications: ${notifications.length}',
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    if (notifications
+                        .where((n) => !(n['is_read'] ?? true))
+                        .isNotEmpty) ...[
+                      const SizedBox(width: 16),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.errorRed,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.circle,
+                              color: Colors.white,
+                              size: 8,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '${notifications.where((n) => !(n['is_read'] ?? true)).length} Unread',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 24),
+                if (notifications.isEmpty)
+                  Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.notifications_none,
+                          size: 64,
+                          color: Colors.grey,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No notifications yet',
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(color: Colors.grey[600]),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'You\'ll see notifications here when there are updates',
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: Colors.grey[500]),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Card(
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: notifications.length,
+                        itemBuilder: (context, index) {
+                          final notification = notifications[index];
+                          final isRead = notification['is_read'] ?? false;
+                          final type = notification['type'] ?? 'system';
+                          final title = notification['title'] ?? 'Notification';
+                          final message = notification['message'] ?? '';
+                          final createdAt = notification['createdAt'];
+
+                          IconData icon;
+                          Color iconColor;
+                          switch (type) {
+                            case 'system':
+                              icon = Icons.info;
+                              iconColor = AppTheme.primaryBlue;
+                              break;
+                            case 'test_result':
+                              icon = Icons.science;
+                              iconColor = AppTheme.successGreen;
+                              break;
+                            case 'inventory':
+                              icon = Icons.inventory;
+                              iconColor = AppTheme.warningYellow;
+                              break;
+                            case 'payment':
+                              icon = Icons.payment;
+                              iconColor = AppTheme.accentOrange;
+                              break;
+                            case 'request':
+                              icon = Icons.assignment;
+                              iconColor = AppTheme.secondaryTeal;
+                              break;
+                            case 'message':
+                              icon = Icons.mail;
+                              iconColor = AppTheme.primaryBlue;
+                              break;
+                            case 'issue':
+                              icon = Icons.warning;
+                              iconColor = AppTheme.errorRed;
+                              break;
+                            case 'feedback':
+                              icon = Icons.feedback;
+                              iconColor = AppTheme.secondaryTeal;
+                              break;
+                            case 'maintenance':
+                              icon = Icons.build;
+                              iconColor = AppTheme.warningYellow;
+                              break;
+                            default:
+                              icon = Icons.notifications;
+                              iconColor = AppTheme.secondaryTeal;
+                          }
+
+                          return AnimatedCard(
+                            margin: const EdgeInsets.only(bottom: 16),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: isRead
+                                    ? null
+                                    : AppTheme.primaryBlue.withValues(
+                                        alpha: 0.03,
+                                      ),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: ExpansionTile(
+                                leading: Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: iconColor.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(icon, color: iconColor, size: 24),
+                                ),
+                                title: Text(
+                                  title,
+                                  style: TextStyle(
+                                    fontWeight: isRead
+                                        ? FontWeight.w500
+                                        : FontWeight.bold,
+                                  ),
+                                ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (message.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        message,
+                                        style: TextStyle(
+                                          color: Colors.grey[600],
+                                          fontSize: 14,
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                    if (createdAt != null) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _formatNotificationTime(createdAt),
+                                        style: TextStyle(
+                                          color: Colors.grey[500],
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                trailing: isRead
+                                    ? null
+                                    : Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: const BoxDecoration(
+                                          color: Colors.blue,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                children: [
+                                  if (message.isNotEmpty &&
+                                      message.length > 100) ...[
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        72,
+                                        0,
+                                        16,
+                                        16,
+                                      ),
+                                      child: Text(
+                                        message,
+                                        style: TextStyle(
+                                          color: Colors.grey[700],
+                                          fontSize: 14,
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _formatNotificationTime(dynamic createdAt) {
+    if (createdAt == null) return '';
+
+    try {
+      final dateTime = DateTime.parse(createdAt.toString());
+      final now = DateTime.now();
+      final difference = now.difference(dateTime);
+
+      if (difference.inDays > 0) {
+        return '${difference.inDays} day${difference.inDays == 1 ? '' : 's'} ago';
+      } else if (difference.inHours > 0) {
+        return '${difference.inHours} hour${difference.inHours == 1 ? '' : 's'} ago';
+      } else if (difference.inMinutes > 0) {
+        return '${difference.inMinutes} minute${difference.inMinutes == 1 ? '' : 's'} ago';
+      } else {
+        return 'Just now';
+      }
+    } catch (e) {
+      return '';
+    }
   }
 
   Widget _buildDashboardView() {
@@ -2289,104 +3016,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     );
   }
 
-  Future<void> _uploadResult(String detailId) async {
-    // Show dialog for result input
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Upload Test Result'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _resultController,
-              decoration: const InputDecoration(
-                labelText: 'Result Value',
-                hintText: 'Enter test result',
-                border: OutlineInputBorder(),
-              ),
-              maxLines: 3,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _remarksController,
-              decoration: const InputDecoration(
-                labelText: 'Remarks (Optional)',
-                hintText: 'Additional notes',
-                border: OutlineInputBorder(),
-              ),
-              maxLines: 2,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(_resultController.text),
-            child: const Text('Upload'),
-          ),
-        ],
-      ),
-    );
-
-    if (result != null && result.isNotEmpty) {
-      try {
-        print('🔍 FRONTEND DEBUG: Uploading result for detailId: $detailId');
-        print('🔍 FRONTEND DEBUG: Result value: "$result"');
-        print('🔍 FRONTEND DEBUG: Remarks: "${_remarksController.text}"');
-
-        final response = await StaffApiService.uploadResult(
-          detailId: detailId,
-          resultValue: result,
-          remarks: _remarksController.text.isNotEmpty
-              ? _remarksController.text
-              : null,
-        );
-
-        print('🔍 FRONTEND DEBUG: Upload response: $response');
-
-        if (response['success'] == true) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  response['message'] ?? 'Result uploaded successfully',
-                ),
-                backgroundColor: AppTheme.successGreen,
-              ),
-            );
-            // Clear controllers
-            _resultController.clear();
-            _remarksController.clear();
-            // Refresh orders to show updated status
-            _loadOrdersInBackground();
-          }
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(response['message'] ?? 'Failed to upload result'),
-                backgroundColor: AppTheme.errorRed,
-              ),
-            );
-          }
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error uploading result: $e'),
-              backgroundColor: AppTheme.errorRed,
-            ),
-          );
-        }
-      }
-    }
-  }
-
   Widget _buildInfoItem(IconData icon, String value, String label) {
     return Row(
       children: [
@@ -2416,695 +3045,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
         ),
       ],
     );
-  }
-
-  Widget _buildDetailRow(
-    String label,
-    String value, {
-    bool isBold = false,
-    Color? color,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Text('$label: ', style: const TextStyle(fontWeight: FontWeight.w500)),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                fontWeight: isBold ? FontWeight.w600 : FontWeight.normal,
-                color: color,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showInvoiceDetails(String orderId) async {
-    // Find the order from the current orders list
-    final orders = _allOrders?['orders'] as List<dynamic>? ?? [];
-    final order = orders.firstWhere(
-      (o) => o['order_id'] == orderId,
-      orElse: () => null,
-    );
-
-    if (order == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Order not found. Please refresh the page.'),
-        ),
-      );
-      return;
-    }
-
-    try {
-      // Get invoice ID directly from order ID
-      final invoiceResponse = await StaffApiService.getInvoiceByOrderId(
-        orderId,
-      );
-      final invoice = invoiceResponse['invoice'];
-
-      if (invoice == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'No invoice found for this order. The order may not have been invoiced yet.',
-            ),
-          ),
-        );
-        return;
-      }
-
-      // Show invoice dialog with loading state
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Invoice'),
-          content: const Row(
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 16),
-              Text('Loading invoice details...'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                if (Navigator.of(dialogContext).canPop()) {
-                  Navigator.of(dialogContext).pop();
-                }
-              },
-              child: const Text('Cancel'),
-            ),
-          ],
-        ),
-      );
-
-      // Fetch detailed invoice using the new API
-      final response = await StaffApiService.getInvoiceDetails(invoice['_id']);
-
-      // Check if response is valid
-      if (response == null || response['success'] == false) {
-        if (!mounted) return;
-        // Close the loading dialog
-        if (Navigator.of(context).canPop()) {
-          Navigator.of(context).pop();
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Failed to load invoice details: ${response?['message'] ?? 'Unknown error'}',
-            ),
-          ),
-        );
-        return;
-      }
-
-      // Update the dialog with the invoice details
-      if (!mounted) return;
-      // Close the loading dialog
-      if (Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-
-      // Show the detailed invoice dialog
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Invoice'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Invoice Info
-                _buildDetailRow(
-                  'Invoice Date',
-                  response['invoice']?['invoice_date'] != null &&
-                          response['invoice']['invoice_date'].toString() !=
-                              'null' &&
-                          response['invoice']['invoice_date']
-                              .toString()
-                              .isNotEmpty
-                      ? DateTime.parse(
-                          response['invoice']['invoice_date'],
-                        ).toString().split(' ')[0]
-                      : 'N/A',
-                ),
-                _buildDetailRow('Payment Status', 'PAID'),
-
-                const SizedBox(height: 16),
-
-                // Lab Info
-                const Text(
-                  'Laboratory Information:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                _buildDetailRow('Name', response['lab']?['name'] ?? 'N/A'),
-                if (response['lab']?['address'] != null &&
-                    response['lab']['address'].toString().isNotEmpty)
-                  _buildDetailRow('Address', response['lab']['address']),
-                if (response['lab']?['phone'] != null &&
-                    response['lab']['phone'].toString().isNotEmpty)
-                  _buildDetailRow('Phone', response['lab']['phone']),
-
-                const SizedBox(height: 16),
-
-                // Patient Info
-                const Text(
-                  'Patient Information:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                _buildDetailRow('Name', response['patient']?['name'] ?? 'N/A'),
-                if (response['patient']?['patient_id'] != null &&
-                    response['patient']['patient_id'].toString().isNotEmpty)
-                  _buildDetailRow(
-                    'Patient ID',
-                    response['patient']['patient_id'],
-                  ),
-                if (response['patient']?['email'] != null &&
-                    response['patient']['email'].toString().isNotEmpty)
-                  _buildDetailRow('Email', response['patient']['email']),
-                if (response['patient']?['phone'] != null &&
-                    response['patient']['phone'].toString().isNotEmpty)
-                  _buildDetailRow('Phone', response['patient']['phone']),
-
-                const SizedBox(height: 16),
-
-                // Doctor Info
-                if (response['doctor'] != null &&
-                    response['doctor'].toString().isNotEmpty)
-                  _buildDetailRow('Doctor', response['doctor']),
-
-                // Warning message if present
-                if (response['warning'] != null &&
-                    response['warning'].toString().isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppTheme.warningYellow.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.warningYellow),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.warning,
-                          color: AppTheme.warningYellow,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            response['warning'],
-                            style: TextStyle(
-                              color: AppTheme.warningYellow,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-
-                const SizedBox(height: 16),
-
-                // Tests
-                const Text(
-                  'Tests:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                ..._buildInvoiceTestList(response['tests'] ?? []),
-
-                const SizedBox(height: 16),
-
-                // Totals
-                const Text(
-                  'Payment Summary:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                _buildDetailRow(
-                  'Subtotal',
-                  'ILS ${(response['totals']?['subtotal'] ?? 0).toStringAsFixed(2)}',
-                ),
-                if ((response['totals']?['tax'] ?? 0) > 0)
-                  _buildDetailRow(
-                    'Tax',
-                    'ILS ${(response['totals']?['tax'] ?? 0).toStringAsFixed(2)}',
-                  ),
-                if ((response['totals']?['discount'] ?? 0) > 0)
-                  _buildDetailRow(
-                    'Discount',
-                    'ILS ${(response['totals']?['discount'] ?? 0).toStringAsFixed(2)}',
-                  ),
-                const Divider(),
-                _buildDetailRow(
-                  'Total Amount',
-                  'ILS ${(response['totals']?['total'] ?? 0).toStringAsFixed(2)}',
-                  isBold: true,
-                ),
-
-                const SizedBox(height: 8),
-
-                // Payment Status Indicator
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppTheme.successGreen.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: AppTheme.successGreen.withValues(alpha: 0.3),
-                      width: 1,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.check_circle,
-                        color: AppTheme.successGreen,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'PAID IN FULL',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.successGreen,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                if (Navigator.of(context).canPop()) {
-                  Navigator.of(context).pop();
-                }
-              },
-              child: const Text('Close'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      // Close any open dialogs
-      try {
-        if (Navigator.of(context).canPop()) {
-          Navigator.of(context).pop();
-        }
-      } catch (navError) {
-        // Ignore navigation errors during error handling
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load invoice details: $e')),
-      );
-    }
-  }
-
-  List<Widget> _buildDetailedTestList(List<dynamic> orderDetails) {
-    return orderDetails.map((detail) {
-      final testName = detail['test_name'] ?? 'Unknown Test';
-      final assignedStaff = detail['staff_id'];
-      final staffName = assignedStaff != null
-          ? '${assignedStaff['full_name']?['first'] ?? ''} ${assignedStaff['full_name']?['last'] ?? ''}'
-                .trim()
-          : 'Unassigned';
-      final detailId = detail['_id'];
-      final status = detail['status'] ?? 'pending';
-      final sampleCollected = detail['sample_collected'] ?? false;
-
-      // Check if current staff is assigned to this test
-      final isAssignedToCurrentStaff =
-          assignedStaff != null && assignedStaff['_id'] == _currentStaffId;
-
-      return Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.grey[50],
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    testName,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w500,
-                      color: AppTheme.textDark,
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _getStatusColor(status).withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    status.toUpperCase(),
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                      color: _getStatusColor(status),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Icon(
-                  Icons.person,
-                  size: 14,
-                  color: assignedStaff != null
-                      ? AppTheme.primaryBlue
-                      : Colors.grey,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'Staff: $staffName',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: assignedStaff != null
-                        ? AppTheme.primaryBlue
-                        : Colors.grey,
-                  ),
-                ),
-              ],
-            ),
-            if (sampleCollected) ...[
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Icon(
-                    Icons.check_circle,
-                    size: 14,
-                    color: AppTheme.successGreen,
-                  ),
-                  const SizedBox(width: 4),
-                  const Text(
-                    'Sample Collected',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.successGreen,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            if (isAssignedToCurrentStaff) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  if (!sampleCollected &&
-                      (status == 'assigned' || status == 'pending')) ...[
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => _collectSample(detailId),
-                        icon: const Icon(Icons.science, size: 14),
-                        label: const Text('Collect Sample'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryBlue,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          textStyle: const TextStyle(fontSize: 12),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                  if (sampleCollected &&
-                      (status == 'collected' || status == 'in_progress')) ...[
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => _uploadResult(detailId),
-                        icon: const Icon(Icons.upload_file, size: 14),
-                        label: const Text('Upload Result'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.successGreen,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          textStyle: const TextStyle(fontSize: 12),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ],
-          ],
-        ),
-      );
-    }).toList();
-  }
-
-  List<Widget> _buildTestResultsList(List<dynamic> results) {
-    return results.map((result) {
-      final testName = result['test_name'] ?? 'Unknown Test';
-      final testCode = result['test_code'] ?? 'N/A';
-      final status = result['status'] ?? 'pending';
-      final testResult = result['test_result'] ?? 'N/A';
-      final units = result['units'] ?? 'N/A';
-      final referenceRange = result['reference_range'] ?? 'N/A';
-      final remarks = result['remarks'];
-      final hasComponents = result['has_components'] ?? false;
-      final components = result['components'] as List? ?? [];
-
-      return Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.grey[50],
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: status == 'completed'
-                ? AppTheme.successGreen
-                : AppTheme.accentOrange,
-            width: 1,
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    testName,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textDark,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: status == 'completed'
-                        ? AppTheme.successGreen.withValues(alpha: 0.1)
-                        : AppTheme.accentOrange.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    status == 'completed'
-                        ? 'Completed'
-                        : status == 'in_progress'
-                        ? 'In Progress'
-                        : 'Pending',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: status == 'completed'
-                          ? AppTheme.successGreen
-                          : AppTheme.accentOrange,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            if (testCode != 'N/A') ...[
-              const SizedBox(height: 4),
-              Text(
-                'Code: $testCode',
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-              ),
-            ],
-            const SizedBox(height: 8),
-            if (status == 'completed') ...[
-              Row(
-                children: [
-                  const Text(
-                    'Result: ',
-                    style: TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  Expanded(
-                    child: Text(
-                      '$testResult $units',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.primaryBlue,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Reference Range: $referenceRange',
-                style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-              ),
-              if (remarks != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Remarks: $remarks',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontStyle: FontStyle.italic,
-                    color: Colors.grey[700],
-                  ),
-                ),
-              ],
-              if (hasComponents && components.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                const Text(
-                  'Components:',
-                  style: TextStyle(fontWeight: FontWeight.w500),
-                ),
-                const SizedBox(height: 4),
-                ...components.map(
-                  (component) => Padding(
-                    padding: const EdgeInsets.only(left: 8, bottom: 4),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${component['component_name']}: ${component['component_value']} ${component['units'] ?? ''}',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                        if (component['reference_range'] != null)
-                          Text(
-                            ' (${component['reference_range']})',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ] else ...[
-              Text(
-                'Result: $testResult',
-                style: TextStyle(
-                  fontWeight: FontWeight.w500,
-                  color: AppTheme.accentOrange,
-                ),
-              ),
-            ],
-          ],
-        ),
-      );
-    }).toList();
-  }
-
-  List<Widget> _buildInvoiceTestList(List<dynamic> tests) {
-    return tests.map((test) {
-      final testName = test['test_name'] ?? 'Unknown Test';
-      final testCode = test['test_code'] ?? 'N/A';
-      final price = test['price'] ?? 0;
-      final status = test['status'] ?? 'pending';
-
-      return Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.grey[50],
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    testName,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w500,
-                      color: AppTheme.textDark,
-                    ),
-                  ),
-                  if (testCode != 'N/A')
-                    Text(
-                      'Code: $testCode',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                    ),
-                ],
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: status == 'completed'
-                    ? AppTheme.successGreen.withValues(alpha: 0.1)
-                    : AppTheme.accentOrange.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                status == 'completed' ? 'Done' : 'Pending',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                  color: status == 'completed'
-                      ? AppTheme.successGreen
-                      : AppTheme.accentOrange,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'ILS ${price.toStringAsFixed(2)}',
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                color: AppTheme.primaryBlue,
-              ),
-            ),
-          ],
-        ),
-      );
-    }).toList();
   }
 
   Color _getStatusColor(String status) {
@@ -3200,7 +3140,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
           children: [
             AppAnimations.blurFadeIn(
               Text(
-                'Result Upload',
+                'All My Tests',
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
               delay: 100.ms,
@@ -3208,7 +3148,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
             const SizedBox(height: 16),
             AppAnimations.fadeIn(
               Text(
-                'Upload test results for any test in the lab',
+                'View and manage all tests assigned to you',
                 style: Theme.of(context).textTheme.bodyLarge,
               ),
               delay: 200.ms,
@@ -3241,7 +3181,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
               delay: 250.ms,
             ),
             const SizedBox(height: 16),
-            // Show tests that need result upload
+            // Show all tests assigned to the staff
             AppAnimations.fadeIn(_buildResultUploadList(), delay: 300.ms),
           ],
         ),
@@ -3387,10 +3327,16 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     final testsByStatus = _assignedTests?['tests_by_status'] as Map? ?? {};
     final assignedTests = testsByStatus['assigned'] as List? ?? [];
 
+    // Filter out tests that have already been collected
+    final uncollectedTests = assignedTests.where((test) {
+      final sampleCollected = test['sample_collected'] as bool? ?? false;
+      return !sampleCollected;
+    }).toList();
+
     // Apply search filter
     final filteredTests = _sampleSearchQuery.isEmpty
-        ? assignedTests
-        : assignedTests.where((test) {
+        ? uncollectedTests
+        : uncollectedTests.where((test) {
             final testName = test['test_name']?.toLowerCase() ?? '';
             final patient = test['patient'] as Map<String, dynamic>?;
             final patientName = patient?['name']?.toLowerCase() ?? '';
@@ -3424,22 +3370,46 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
 
     // Apply search filter
     final filteredTests = _resultSearchQuery.isEmpty
-        ? tests
-        : tests.where((test) {
-            final testName = test['test_name']?.toLowerCase() ?? '';
-            final patientName = test['patient']?['name']?.toLowerCase() ?? '';
-            final query = _resultSearchQuery.toLowerCase();
-            return testName.contains(query) || patientName.contains(query);
-          }).toList();
+        ? tests.map((test) => test as Map<String, dynamic>).toList()
+        : tests
+              .where((test) {
+                final testMap = test as Map<String, dynamic>;
+                final testName = testMap['test_name']?.toLowerCase() ?? '';
+                final patientName =
+                    testMap['patient']?['name']?.toLowerCase() ?? '';
+                final query = _resultSearchQuery.toLowerCase();
+                return testName.contains(query) || patientName.contains(query);
+              })
+              .toList()
+              .cast<Map<String, dynamic>>();
 
     if (filteredTests.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
-          child: Text(
-            _resultSearchQuery.isNotEmpty
-                ? 'No tests found matching "$_resultSearchQuery"'
-                : 'No tests ready for result upload',
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.assignment_outlined, size: 64, color: Colors.grey),
+              const SizedBox(height: 16),
+              Text(
+                _resultSearchQuery.isNotEmpty
+                    ? 'No tests found matching "$_resultSearchQuery"'
+                    : 'No tests ready for result upload',
+                style: Theme.of(context).textTheme.titleMedium,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _resultSearchQuery.isNotEmpty
+                    ? 'Try a different search term'
+                    : 'Tests will appear here once samples are collected and ready for result upload',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ),
         ),
       );
@@ -3447,9 +3417,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: filteredTests
-          .map((test) => _buildResultUploadCard(test))
-          .toList(),
+      children: [...filteredTests.map((test) => _buildResultUploadCard(test))],
     );
   }
 
@@ -3500,11 +3468,148 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     );
   }
 
+  void _showCompletedTestResults(Map<String, dynamic> test) {
+    // Navigate to the order results screen to view completed results
+    final orderId = test['order_id']?.toString();
+    if (orderId != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => StaffOrderResultsScreen(orderId: orderId),
+        ),
+      );
+    }
+  }
+
+  void _removeTestFromList(String? detailId) {
+    if (detailId == null || _allResultsForUpload == null) return;
+
+    final tests = _allResultsForUpload!['tests'] as List? ?? [];
+    final updatedTests = tests
+        .where((test) => test['detail_id'] != detailId)
+        .toList();
+
+    setState(() {
+      _allResultsForUpload!['tests'] = updatedTests;
+      // Update total count
+      _allResultsForUpload!['total'] = updatedTests.length;
+    });
+
+    // Show a brief success animation feedback
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white),
+              const SizedBox(width: 8),
+              const Text('Test removed from list'),
+            ],
+          ),
+          backgroundColor: AppTheme.successGreen,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
+  void _removeSampleFromCollectionList(String? detailId) {
+    if (detailId == null || _assignedTests == null) return;
+
+    final testsByStatus = _assignedTests!['tests_by_status'] as Map? ?? {};
+    final assignedTests = testsByStatus['assigned'] as List? ?? [];
+
+    // Find and remove the test from assigned tests
+    final updatedAssignedTests = assignedTests
+        .where((test) => test['detail_id'] != detailId)
+        .toList();
+
+    setState(() {
+      _assignedTests!['tests_by_status']['assigned'] = updatedAssignedTests;
+      // Update total count
+      _assignedTests!['total'] = (_assignedTests!['total'] as int? ?? 0) - 1;
+    });
+
+    // Show a brief success animation feedback
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.science, color: Colors.white),
+              const SizedBox(width: 8),
+              const Text('Sample collected - removed from list'),
+            ],
+          ),
+          backgroundColor: AppTheme.secondaryTeal,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
   Widget _buildResultUploadCard(Map<String, dynamic> test) {
     final testName = test['test_name'] as String? ?? 'Unknown Test';
     final patient = test['patient'] as Map<String, dynamic>?;
     final patientName = patient?['name'] as String? ?? 'Unknown Patient';
     final detailId = test['detail_id']?.toString();
+    final status = test['status'] as String? ?? 'unknown';
+
+    // Determine status color and text
+    Color statusColor;
+    String statusText;
+    IconData statusIcon;
+    Color buttonColor;
+    String buttonText;
+    IconData buttonIcon;
+    bool showButton;
+
+    switch (status) {
+      case 'assigned':
+        statusColor = AppTheme.primaryBlue;
+        statusText = 'Assigned';
+        statusIcon = Icons.assignment;
+        buttonColor = AppTheme.primaryBlue;
+        buttonText = 'Collect Sample';
+        buttonIcon = Icons.science;
+        showButton = true;
+        break;
+      case 'collected':
+        statusColor = AppTheme.secondaryTeal;
+        statusText = 'Sample Collected';
+        statusIcon = Icons.check_circle;
+        buttonColor = AppTheme.primaryBlue;
+        buttonText = 'Upload Result';
+        buttonIcon = Icons.upload;
+        showButton = true;
+        break;
+      case 'in_progress':
+        statusColor = AppTheme.warningYellow;
+        statusText = 'In Progress';
+        statusIcon = Icons.hourglass_top;
+        buttonColor = AppTheme.primaryBlue;
+        buttonText = 'Continue Upload';
+        buttonIcon = Icons.upload;
+        showButton = true;
+        break;
+      case 'completed':
+        statusColor = AppTheme.successGreen;
+        statusText = 'Completed';
+        statusIcon = Icons.done_all;
+        buttonColor = AppTheme.successGreen;
+        buttonText = 'View Results';
+        buttonIcon = Icons.visibility;
+        showButton = true;
+        break;
+      default:
+        statusColor = Colors.grey;
+        statusText = 'Unknown';
+        statusIcon = Icons.help;
+        buttonColor = Colors.grey;
+        buttonText = 'N/A';
+        buttonIcon = Icons.help;
+        showButton = false;
+    }
 
     return AnimatedCard(
       margin: const EdgeInsets.only(bottom: 16),
@@ -3515,7 +3620,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
           children: [
             Row(
               children: [
-                const Icon(Icons.upload_file, color: AppTheme.primaryBlue),
+                Icon(statusIcon, color: statusColor),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -3529,13 +3634,13 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: AppTheme.secondaryTeal.withValues(alpha: 0.2),
+                    color: statusColor.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Text(
-                    'Ready for Upload',
+                  child: Text(
+                    statusText,
                     style: TextStyle(
-                      color: AppTheme.secondaryTeal,
+                      color: statusColor,
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                     ),
@@ -3546,19 +3651,38 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
             const SizedBox(height: 8),
             Text('Patient: $patientName'),
             const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.upload),
-                label: const Text('Upload Result'),
-                onPressed: detailId != null && detailId.isNotEmpty
-                    ? () => _showUploadResultDialog(test)
-                    : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryBlue,
+            if (showButton)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: Icon(buttonIcon),
+                  label: Text(buttonText),
+                  onPressed:
+                      detailId != null &&
+                          detailId.isNotEmpty &&
+                          !detailId.startsWith('sample_')
+                      ? () {
+                          if (status == 'completed') {
+                            // For completed tests, show results instead of upload dialog
+                            _showCompletedTestResults(test);
+                          } else {
+                            _showUploadResultDialog(test);
+                          }
+                        }
+                      : () {
+                          // Handle sample data
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'This is sample data for development. Connect to a database for real functionality.',
+                              ),
+                              duration: Duration(seconds: 3),
+                            ),
+                          );
+                        },
+                  style: ElevatedButton.styleFrom(backgroundColor: buttonColor),
                 ),
               ),
-            ),
           ],
         ),
       ),
@@ -3589,19 +3713,11 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                 ),
                 AppAnimations.scaleIn(
                   _buildStatItem(
-                    'Urgent',
-                    stats['urgent']?.toString() ?? '0',
-                    AppTheme.errorRed,
-                  ),
-                  delay: 200.ms,
-                ),
-                AppAnimations.scaleIn(
-                  _buildStatItem(
                     'Pending',
                     stats['pending_work']?.toString() ?? '0',
                     AppTheme.warningYellow,
                   ),
-                  delay: 300.ms,
+                  delay: 200.ms,
                 ),
               ],
             ),
@@ -3683,15 +3799,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                 ),
                 AppAnimations.glowPulse(
                   _buildEnhancedHeroMetric(
-                    'Urgent Tests',
-                    stats['urgent']?.toString() ?? '0',
-                    Icons.priority_high,
-                    AppTheme.errorRed,
-                  ),
-                  glowColor: AppTheme.errorRed,
-                ),
-                AppAnimations.glowPulse(
-                  _buildEnhancedHeroMetric(
                     'Pending Work',
                     stats['pending_work']?.toString() ?? '0',
                     Icons.pending,
@@ -3750,20 +3857,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                 ),
                 AppAnimations.scaleIn(
                   ChoiceChip(
-                    label: const Text('Urgent'),
-                    selected: _selectedStatus == 'urgent',
-                    selectedColor: AppTheme.errorRed.withValues(alpha: 0.3),
-                    onSelected: (selected) {
-                      setState(
-                        () => _selectedStatus = selected ? 'urgent' : null,
-                      );
-                      _loadAssignedTests();
-                    },
-                  ),
-                  delay: 200.ms,
-                ),
-                AppAnimations.scaleIn(
-                  ChoiceChip(
                     label: const Text('Assigned'),
                     selected: _selectedStatus == 'assigned',
                     onSelected: (selected) {
@@ -3773,7 +3866,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                       _loadAssignedTests();
                     },
                   ),
-                  delay: 300.ms,
+                  delay: 200.ms,
                 ),
                 AppAnimations.scaleIn(
                   ChoiceChip(
@@ -3787,6 +3880,19 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                     },
                   ),
                   delay: 400.ms,
+                ),
+                AppAnimations.scaleIn(
+                  ChoiceChip(
+                    label: const Text('Completed'),
+                    selected: _selectedStatus == 'completed',
+                    onSelected: (selected) {
+                      setState(
+                        () => _selectedStatus = selected ? 'completed' : null,
+                      );
+                      _loadAssignedTests();
+                    },
+                  ),
+                  delay: 500.ms,
                 ),
               ],
             ),
@@ -3803,14 +3909,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (testsByStatus['urgent']?.isNotEmpty ?? false) ...[
-          _buildTestsGroup(
-            'Urgent Tests',
-            testsByStatus['urgent'],
-            AppTheme.errorRed,
-          ),
-          const SizedBox(height: 16),
-        ],
         if (testsByStatus['assigned']?.isNotEmpty ?? false) ...[
           _buildTestsGroup(
             'Assigned Tests',
@@ -4214,8 +4312,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
 
   IconData _getStatusIcon(String status) {
     switch (status) {
-      case 'urgent':
-        return Icons.priority_high;
       case 'assigned':
         return Icons.assignment;
       case 'collected':
@@ -4332,8 +4428,8 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
       final response = await StaffApiService.getNotifications(
         authProvider.staffId ?? '',
       );
-      final notifications = response['notifications'] as List? ?? [];
-      final total = response['count'] ?? notifications.length;
+      final notifications = response as List? ?? [];
+      final total = notifications.length;
 
       if (!mounted) return;
 
@@ -4359,9 +4455,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
                       IconData icon;
 
                       switch (notification['type']) {
-                        case 'urgent':
-                          icon = Icons.warning;
-                          break;
                         case 'info':
                           icon = Icons.info;
                           break;
@@ -4507,5 +4600,40 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen>
     } catch (e) {
       return dateString;
     }
+  }
+
+  void _showLogoutDialog() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              // Close dialog first
+              Navigator.pop(dialogContext);
+
+              // Perform logout
+              final authProvider = Provider.of<StaffAuthProvider>(
+                context,
+                listen: false,
+              );
+              await authProvider.logout();
+
+              // Navigate to home using named route
+              if (context.mounted) {
+                context.goNamed('home');
+              }
+            },
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
   }
 }

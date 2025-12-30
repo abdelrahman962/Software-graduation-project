@@ -28,6 +28,7 @@ class _OwnerRegistrationFormState extends State<OwnerRegistrationForm> {
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
   final _emailController = TextEditingController();
+  final _subscriptionEndDateController = TextEditingController();
   bool _isLoading = false;
 
   @override
@@ -41,6 +42,7 @@ class _OwnerRegistrationFormState extends State<OwnerRegistrationForm> {
     _phoneController.dispose();
     _addressController.dispose();
     _emailController.dispose();
+    _subscriptionEndDateController.dispose();
     super.dispose();
   }
 
@@ -58,6 +60,9 @@ class _OwnerRegistrationFormState extends State<OwnerRegistrationForm> {
       address: _addressController.text,
       email: _emailController.text,
       selectedPlan: widget.selectedPlan,
+      labName: '',
+      labLicenseNumber: '',
+      subscriptionEndDate: _subscriptionEndDateController.text,
     );
     setState(() => _isLoading = false);
     if (mounted && response['success'] != false) {
@@ -78,8 +83,36 @@ class _OwnerRegistrationFormState extends State<OwnerRegistrationForm> {
         ),
       );
     } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(response['message'] ?? 'Registration failed')),
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.error, color: Colors.red, size: 32),
+              SizedBox(width: 12),
+              Text('Registration Failed'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(response['message'] ?? 'Registration failed'),
+              const SizedBox(height: 16),
+              const Text(
+                'Please check your information and try again. If the problem persists, contact our support team.',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
       );
     }
   }
@@ -154,6 +187,13 @@ class _OwnerRegistrationFormState extends State<OwnerRegistrationForm> {
             TextFormField(
               controller: _emailController,
               decoration: const InputDecoration(labelText: 'Email'),
+              validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+            ),
+            TextFormField(
+              controller: _subscriptionEndDateController,
+              decoration: const InputDecoration(
+                labelText: 'Subscription End Date (YYYY-MM-DD)',
+              ),
               validator: (v) => v == null || v.isEmpty ? 'Required' : null,
             ),
             const SizedBox(height: 16),

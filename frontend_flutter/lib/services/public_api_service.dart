@@ -13,27 +13,42 @@ class PublicApiService {
     required String address,
     required String email,
     required String selectedPlan,
+    required String labName,
+    required String labLicenseNumber,
     String? socialStatus,
     String? qualification,
     String? professionLicense,
     String? bankIban,
+    String? subscriptionEndDate,
   }) async {
-    return await ApiService.post('/owner/request-access', {
-      'first_name': firstName,
-      'middle_name': middleName,
-      'last_name': lastName,
+    // Parse address into components for the API
+    final addressParts = address.split(', ');
+    final addressMap = {
+      'city': addressParts.isNotEmpty ? addressParts[0] : '',
+      'street': addressParts.length > 1 ? addressParts[1] : '',
+      'building_number': addressParts.length > 2 ? addressParts[2] : '',
+    };
+
+    return await ApiService.post('/public/owner/register', {
+      'full_name': {'first': firstName, 'middle': middleName, 'last': lastName},
       'identity_number': identityNumber,
       'birthday': birthday,
       'gender': gender,
-      'phone': phone,
-      'address': address,
+      'phone_number': phone,
       'email': email,
-      'selected_plan': selectedPlan,
-      if (socialStatus != null) 'social_status': socialStatus,
-      if (qualification != null) 'qualification': qualification,
-      if (professionLicense != null) 'profession_license': professionLicense,
-      if (bankIban != null) 'bank_iban': bankIban,
+      'address': addressMap,
+      'lab_name': labName,
+      'lab_license_number': labLicenseNumber,
+      'subscription_tier': selectedPlan,
+      'subscription_period_months': 1,
+      if (subscriptionEndDate != null && subscriptionEndDate.isNotEmpty)
+        'subscription_end_date': subscriptionEndDate,
     });
+  }
+
+  // Get available subscription tiers
+  static Future<Map<String, dynamic>> getSubscriptionTiers() async {
+    return await ApiService.get('/public/subscription-tiers');
   }
 
   // Submit registration (get token)

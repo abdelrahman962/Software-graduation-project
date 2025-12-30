@@ -67,8 +67,7 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
               final resultValue = result['test_result']?.toString() ?? '';
               if (resultValue.contains('High') ||
                   resultValue.contains('Low') ||
-                  resultValue.contains('Abnormal') ||
-                  result['status'] == 'urgent') {
+                  resultValue.contains('Abnormal')) {
                 _hasAbnormalResults = true;
                 _abnormalCount++;
               }
@@ -611,6 +610,7 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                                     components,
                                     result['status'] ?? 'pending',
                                     result['remarks'],
+                                    result['staff'],
                                   );
                                 } else {
                                   // Single-value test - show simple row
@@ -620,6 +620,7 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                                     result['reference_range'] ?? 'N/A',
                                     result['units'] ?? 'N/A',
                                     result['status'] ?? 'pending',
+                                    result['staff'],
                                   );
                                 }
                               }),
@@ -752,6 +753,7 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
     String reference,
     String unit,
     String status,
+    Map<String, dynamic>? staff,
   ) {
     // Determine display text and color based on status
     String displayResult;
@@ -800,12 +802,28 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
                     ),
                   ),
                 Expanded(
-                  child: Text(
-                    testName,
-                    style: AppTheme.medicalTextStyle(
-                      fontSize: 13,
-                      color: AppTheme.textDark,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        testName,
+                        style: AppTheme.medicalTextStyle(
+                          fontSize: 13,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                      if (staff != null && staff['full_name'] != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'Performed by: ${_buildStaffName(staff)}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.primaryBlue,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ],
@@ -866,6 +884,7 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
     List<dynamic> components,
     String status,
     String? remarks,
+    Map<String, dynamic>? staff,
   ) {
     return ExpansionTile(
       title: Padding(
@@ -874,13 +893,29 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
           children: [
             Expanded(
               flex: 3,
-              child: Text(
-                testName,
-                style: AppTheme.medicalTextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textDark,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    testName,
+                    style: AppTheme.medicalTextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textDark,
+                    ),
+                  ),
+                  if (staff != null && staff['full_name'] != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Performed by: ${_buildStaffName(staff)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.primaryBlue,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
             Expanded(
@@ -1640,5 +1675,23 @@ class _PatientOrderReportScreenState extends State<PatientOrderReportScreen> {
       padding: const pw.EdgeInsets.all(8),
       child: pw.Text(text, style: const pw.TextStyle(fontSize: 10)),
     );
+  }
+
+  String _buildStaffName(Map<String, dynamic> staff) {
+    final fullName = staff['full_name'];
+    if (fullName is Map<String, dynamic>) {
+      final first = fullName['first'] ?? '';
+      final middle = fullName['middle'] ?? '';
+      final last = fullName['last'] ?? '';
+      final parts = [
+        first,
+        middle,
+        last,
+      ].where((part) => part.isNotEmpty).toList();
+      return parts.isEmpty ? 'Unknown Staff' : parts.join(' ');
+    } else if (fullName is String) {
+      return fullName;
+    }
+    return 'Unknown Staff';
   }
 }

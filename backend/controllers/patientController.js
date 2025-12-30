@@ -266,19 +266,19 @@ exports.getOrderById = async (req, res, next) => {
 
     // Get invoice - try multiple ways to find it
     let invoice = await Invoice.findOne({ order_id: order._id });
-    console.log(`Looking for invoice for order ${order._id}, found:`, invoice ? invoice._id : 'null');
+    // console.log(`Looking for invoice for order ${order._id}, found:`, invoice ? invoice._id : 'null');
     
     // If not found, try with string comparison
     if (!invoice) {
       invoice = await Invoice.findOne({ order_id: order._id.toString() });
-      console.log(`String comparison for order ${order._id}, found:`, invoice ? invoice._id : 'null');
+      // console.log(`String comparison for order ${order._id}, found:`, invoice ? invoice._id : 'null');
     }
     
     // If still not found, try finding any invoice for this patient that might be related
     if (!invoice) {
       const allInvoices = await Invoice.find({}).populate('order_id');
       invoice = allInvoices.find(inv => inv.order_id && inv.order_id._id.toString() === order._id.toString());
-      console.log(`Manual search for order ${order._id}, found:`, invoice ? invoice._id : 'null');
+      // console.log(`Manual search for order ${order._id}, found:`, invoice ? invoice._id : 'null');
     }
 
     res.json({
@@ -304,7 +304,7 @@ exports.requestTests = async (req, res, next) => {
     // Start transaction to ensure atomicity
     session.startTransaction();
     
-    const { owner_id, test_ids, remarks, doctor_id, is_urgent } = req.body;
+    const { owner_id, test_ids, remarks, doctor_id } = req.body;
 
     // Validate input
     if (!owner_id || !test_ids || test_ids.length === 0) {
@@ -342,7 +342,7 @@ exports.requestTests = async (req, res, next) => {
       doctor_id: doctor_id || null, // Link to doctor if provided
       order_date: new Date(),
       status: 'processing',
-      remarks: is_urgent ? 'urgent' : remarks, // Support urgent flag
+      remarks: remarks,
       owner_id,
       is_patient_registered: true
     }], { session });
@@ -351,7 +351,7 @@ exports.requestTests = async (req, res, next) => {
     const orderDetails = test_ids.map(test_id => ({
       order_id: newOrder._id,
       test_id,
-      status: is_urgent ? 'urgent' : 'pending', // Set urgent status if requested
+      status: 'pending',
       sample_collected: false
     }));
 
@@ -403,8 +403,8 @@ exports.requestTests = async (req, res, next) => {
       receiver_id: owner_id,
       receiver_model: 'Owner',
       type: 'system',
-      title: is_urgent ? '🚨 Urgent Test Request from Patient' : 'New Test Request',
-      message: `Patient ${req.user.full_name.first} ${req.user.full_name.last} has requested ${test_ids.length} test(s).${is_urgent ? ' - URGENT' : ''}`
+      title: 'New Test Request',
+      message: `Patient ${req.user.full_name.first} ${req.user.full_name.last} has requested ${test_ids.length} test(s).`
     }], { session });
 
     // If doctor is linked to this order, notify them too
@@ -415,27 +415,9 @@ exports.requestTests = async (req, res, next) => {
         receiver_id: doctor_id,
         receiver_model: 'Doctor',
         type: 'system',
-        title: is_urgent ? '🚨 Your Patient Requested Urgent Tests' : 'Patient Test Request',
-        message: `${req.user.full_name.first} ${req.user.full_name.last} has requested ${test_ids.length} test(s).${is_urgent ? ' (URGENT)' : ''}`
+        title: 'Patient Test Request',
+        message: `${req.user.full_name.first} ${req.user.full_name.last} has requested ${test_ids.length} test(s).`
       }], { session });
-    }
-
-    // If urgent, notify all lab staff
-    if (is_urgent) {
-      const Staff = require('../models/Staff');
-      const labStaff = await Staff.find({ owner_id }).session(session);
-      
-      const staffNotifications = labStaff.map(staff => ({
-        sender_id: req.user._id,
-        sender_model: 'Patient',
-        receiver_id: staff._id,
-        receiver_model: 'Staff',
-        type: 'request',
-        title: '🚨 URGENT Test Request from Patient',
-        message: `Urgent test request for patient ${req.user.full_name.first} ${req.user.full_name.last}.`
-      }));
-
-      await Notification.insertMany(staffNotifications, { session });
     }
 
     // Commit transaction - all operations succeeded
@@ -451,7 +433,7 @@ exports.requestTests = async (req, res, next) => {
     const emailMessage = `
 Hello ${patient.full_name.first},
 
-Your test order has been submitted successfully${is_urgent ? ' as URGENT' : ''}!
+Your test order has been submitted successfully!
 
 Lab: ${lab.lab_name}
 Tests: ${tests.map(t => t.test_name).join(', ')}
@@ -462,8 +444,6 @@ Next Steps:
 2. Bring your ID for verification
 3. Results will be available in your account after processing
 
-${is_urgent ? '⚠️ This is an URGENT test request. Please visit the lab immediately.' : ''}
-
 Lab Contact: ${lab.phone_number}
 
 Best regards,
@@ -471,10 +451,10 @@ MedLab System
     `;
 
     await sendEmail(patient.email, emailSubject, emailMessage);
-    await sendSMS(patient.phone_number, `Your test order at ${lab.lab_name} is confirmed${is_urgent ? ' (URGENT)' : ''}. ${tests.length} test(s), Total: ${subtotal} ILS. Visit lab for sample collection.`);
+    await sendSMS(patient.phone_number, `Your test order at ${lab.lab_name} is confirmed. ${tests.length} test(s), Total: ${subtotal} ILS. Visit lab for sample collection.`);
 
     res.status(201).json({
-      message: `✅ Test request submitted successfully${is_urgent ? ' as URGENT' : ''}. Confirmation sent to your email and phone.`,
+      message: `✅ Test request submitted successfully. Confirmation sent to your email and phone.`,
       order: await Order.findById(newOrder._id).populate('owner_id', 'lab_name').populate('doctor_id', 'name'),
       invoice,
       doctor_notified: doctor_id ? true : false
@@ -1467,6 +1447,100 @@ exports.requestInvoiceReport = async (req, res, next) => {
       message: "✅ Invoice report sent successfully to your email and WhatsApp",
       notification: notificationResult
     });
+
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.downloadInvoicePDF = async (req, res, next) => {
+  try {
+    const invoiceId = req.params.invoiceId;
+
+    // Find invoice belonging to the patient
+    const invoice = await Invoice.findOne({
+      _id: invoiceId,
+      order_id: { $exists: true }
+    })
+    .populate({
+      path: 'order_id',
+      match: { patient_id: req.user._id },
+      populate: {
+        path: 'owner_id',
+        select: 'lab_name address phone_number'
+      }
+    })
+    .populate({
+      path: 'tests.test_id',
+      select: 'test_name price test_code'
+    });
+
+    if (!invoice || !invoice.order_id) {
+      return res.status(404).json({ message: '❌ Invoice not found or access denied' });
+    }
+
+    const patient = await Patient.findById(req.user._id);
+    const labName = invoice.order_id.owner_id?.lab_name || 'Medical Lab';
+
+    // Prepare invoice data for PDF generation
+    const invoiceData = {
+      invoice_id: invoice.invoice_id,
+      created_at: invoice.created_at,
+      status: invoice.status,
+      subtotal: invoice.subtotal || 0,
+      discount: invoice.discount || 0,
+      tax: invoice.tax || 0,
+      total_amount: invoice.total_amount || 0,
+      lab: {
+        name: labName,
+        address: invoice.order_id.owner_id?.address || 'N/A',
+        phone_number: invoice.order_id.owner_id?.phone_number || 'N/A'
+      },
+      patient: {
+        name: `${patient.full_name?.first || ''} ${patient.full_name?.last || ''}`.trim(),
+        patient_id: patient.patient_id,
+        identity_number: patient.identity_number
+      },
+      tests: invoice.tests?.map(test => ({
+        test_name: test.test_id?.test_name || 'Unknown Test',
+        test_code: test.test_id?.test_code || '',
+        price: test.price || 0,
+        quantity: test.quantity || 1
+      })) || [],
+      payments: invoice.payments || []
+    };
+
+    // Import the PDF generator
+    const { generateInvoicePDF, cleanupPDFFile } = require('../utils/pdfGenerator');
+
+    try {
+      // Generate PDF
+      const pdfPath = await generateInvoicePDF(invoiceData);
+
+      // Set headers for file download
+      const fileName = `invoice_${invoice.invoice_id}_${Date.now()}.pdf`;
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+
+      // Send the PDF file
+      res.sendFile(pdfPath, async (err) => {
+        if (err) {
+          console.error('❌ Error sending PDF file:', err);
+          return res.status(500).json({ message: '❌ Error downloading PDF' });
+        }
+
+        // Clean up the temporary PDF file after sending
+        try {
+          await cleanupPDFFile(pdfPath);
+        } catch (cleanupErr) {
+          console.warn('⚠️ Warning: Could not cleanup PDF file:', cleanupErr.message);
+        }
+      });
+
+    } catch (pdfErr) {
+      console.error('❌ Error generating PDF:', pdfErr);
+      return res.status(500).json({ message: '❌ Error generating PDF' });
+    }
 
   } catch (err) {
     next(err);

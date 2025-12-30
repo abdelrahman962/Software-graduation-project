@@ -39,14 +39,14 @@ class _StaffOrderResultsScreenState extends State<StaffOrderResultsScreen> {
       );
 
       // Debug: Log the full API response
-      print('🔍 FRONTEND DEBUG: Order results response for ${widget.orderId}:');
-      print('Order info: ${response['order']}');
-      print('Results count: ${response['results']?.length ?? 0}');
-      response['results']?.forEach((result) {
-        print(
-          'Test: ${result['test_name']}, Status: ${result['status']}, Result: "${result['test_result']}", Has Result: ${result['result'] != null}',
-        );
-      });
+      // print('🔍 FRONTEND DEBUG: Order results response for ${widget.orderId}:');
+      // print('Order info: ${response['order']}');
+      // print('Results count: ${response['results']?.length ?? 0}');
+      // response['results']?.forEach((result) {
+      //   print(
+      //     'Test: ${result['test_name']}, Status: ${result['status']}, Result: "${result['test_result']}", Has Result: ${result['result'] != null}',
+      //   );
+      // });
 
       if (mounted) {
         setState(() {
@@ -595,7 +595,7 @@ class _StaffOrderResultsScreenState extends State<StaffOrderResultsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            component['value']?.toString() ?? 'N/A',
+                            component['component_value']?.toString() ?? 'N/A',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
@@ -644,9 +644,9 @@ class _StaffOrderResultsScreenState extends State<StaffOrderResultsScreen> {
                       builder: (context) {
                         final displayValue =
                             result['test_result']?.toString() ?? 'N/A';
-                        print(
-                          '🔍 FRONTEND DEBUG: Displaying result for ${result['test_name']}: "${result['test_result']}" -> "$displayValue"',
-                        );
+                        // print(
+                        //   '🔍 FRONTEND DEBUG: Displaying result for ${result['test_name']}: "${result['test_result']}" -> "$displayValue"',
+                        // );
                         return Text(
                           displayValue,
                           style: const TextStyle(

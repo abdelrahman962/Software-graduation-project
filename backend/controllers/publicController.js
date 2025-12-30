@@ -392,8 +392,32 @@ exports.completeRegistration = async (req, res) => {
     }
 
     // Generate unique patient ID
-    const lastPatient = await Patient.findOne().sort({ patient_id: -1 });
-    const newPatientId = lastPatient ? parseInt(lastPatient.patient_id) + 1 : 1000;
+    let newPatientId = 1000;
+
+    try {
+      // Find the highest numeric patient_id
+      const lastPatient = await Patient.findOne({
+        patient_id: { $exists: true, $ne: null, $ne: 'NaN', $regex: /^\d+$/ }
+      }).sort({ patient_id: -1 });
+
+      if (lastPatient && lastPatient.patient_id) {
+        const lastId = parseInt(lastPatient.patient_id);
+        if (!isNaN(lastId)) {
+          newPatientId = lastId + 1;
+        }
+      }
+    } catch (error) {
+      console.warn('Error generating patient ID in public registration, using timestamp fallback:', error.message);
+      // If there's any issue, generate a timestamp-based ID to ensure uniqueness
+      newPatientId = parseInt(Date.now().toString());
+    }
+
+    // Ensure patient_id is always a valid number
+    if (isNaN(newPatientId) || newPatientId < 1000) {
+      newPatientId = parseInt(Date.now().toString());
+    }
+
+    console.log(`Generated new patient ID in public registration: ${newPatientId}`);
 
     // Create patient account (password will be hashed by the model's pre-save hook)
     const patient = await Patient.create({
@@ -680,7 +704,7 @@ exports.submitContactForm = async (req, res) => {
           '',
           ''
         );
-        console.log('WhatsApp notification sent to admin for new contact inquiry');
+        // console.log('WhatsApp notification sent to admin for new contact inquiry');
       } catch (whatsappError) {
         console.error('Failed to send WhatsApp notification to admin:', whatsappError);
         // Don't fail the request if WhatsApp fails
@@ -718,6 +742,68 @@ exports.submitContactForm = async (req, res) => {
 };
 
 /**
+ * @desc    Get available subscription tiers for lab owner registration
+ * @route   GET /api/public/subscription-tiers
+ * @access  Public
+ */
+exports.getSubscriptionTiers = async (req, res) => {
+  try {
+    const tiers = {
+      starter: {
+        tier: 'starter',
+        monthlyFee: 50,
+        patientLimit: 500,
+        description: 'Up to 500 patients - $50/month',
+        features: [
+          'Basic lab management',
+          'Patient registration',
+          'Test ordering and results',
+          'Basic reporting',
+          'Email notifications'
+        ]
+      },
+      professional: {
+        tier: 'professional',
+        monthlyFee: 100,
+        patientLimit: 2000,
+        description: 'Up to 2000 patients - $100/month',
+        features: [
+          'All starter features',
+          'Advanced reporting',
+          'Inventory management',
+          'Staff scheduling',
+          'WhatsApp notifications',
+          'Priority support'
+        ]
+      },
+      enterprise: {
+        tier: 'enterprise',
+        monthlyFee: 200,
+        patientLimit: null, // Unlimited
+        description: 'Unlimited patients - $200/month',
+        features: [
+          'All professional features',
+          'Multi-lab management',
+          'Custom integrations',
+          'Advanced analytics',
+          'Dedicated account manager',
+          '24/7 premium support'
+        ]
+      }
+    };
+
+    res.json({
+      success: true,
+      tiers: tiers
+    });
+
+  } catch (err) {
+    console.error("Error fetching subscription tiers:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
  * @desc    Lab Owner Self-Registration
  * @route   POST /api/public/owner/register
  * @access  Public
@@ -737,7 +823,9 @@ exports.registerOwner = async (req, res) => {
       // Lab Information
       lab_name,
       lab_license_number,
-      subscription_period_months = 1
+      subscription_period_months = 1,
+      subscription_tier = 'starter',  // New field for plan selection
+      subscription_end_date
     } = req.body;
 
     // Validate required fields
@@ -777,17 +865,43 @@ exports.registerOwner = async (req, res) => {
       return res.status(500).json({ message: "System not properly configured. No admin found." });
     }
 
-    // Calculate subscription pricing tier
-    const subscriptionPricing = {
-      tier: 'starter',
-      monthlyFee: 50,
-      patientLimit: 500,
-      description: 'Up to 500 patients - $50/month'
+    // Define available subscription tiers
+    const subscriptionTiers = {
+      starter: {
+        tier: 'starter',
+        monthlyFee: 50,
+        patientLimit: 500,
+        description: 'Up to 500 patients - $50/month'
+      },
+      professional: {
+        tier: 'professional',
+        monthlyFee: 100,
+        patientLimit: 2000,
+        description: 'Up to 2000 patients - $100/month'
+      },
+      enterprise: {
+        tier: 'enterprise',
+        monthlyFee: 200,
+        patientLimit: null, // Unlimited
+        description: 'Unlimited patients - $200/month'
+      }
     };
+
+    // Validate subscription tier
+    if (!subscriptionTiers[subscription_tier]) {
+      return res.status(400).json({ 
+        message: "Invalid subscription tier. Please choose from: starter, professional, enterprise" 
+      });
+    }
+
+    const subscriptionPricing = subscriptionTiers[subscription_tier];
 
     // Generate temporary username and password (will be sent upon approval)
     const tempUsername = `${full_name.first.toLowerCase()}${full_name.last.toLowerCase()}${Math.floor(Math.random() * 1000)}`;
     const tempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
+
+    // Generate unique owner_id
+    const owner_id = `OWN-${Date.now()}`;
 
     // Create owner account with is_active: false (pending approval)
     const newOwner = new LabOwner({
@@ -800,6 +914,7 @@ exports.registerOwner = async (req, res) => {
       address: address || {},
       lab_name,
       lab_license_number,
+      owner_id,
       username: tempUsername, // Temporary username
       password: tempPassword, // Temporary password (will be hashed by pre-save hook)
       admin_id: defaultAdmin._id,
@@ -807,6 +922,7 @@ exports.registerOwner = async (req, res) => {
       status: 'pending',
       subscriptionFee: subscriptionPricing.monthlyFee,
       subscription_period_months: parseInt(subscription_period_months) || 1,
+      subscription_end: subscription_end_date ? new Date(subscription_end_date) : null,
       temp_credentials: {
         username: tempUsername,
         password: tempPassword
@@ -843,7 +959,7 @@ exports.registerOwner = async (req, res) => {
     // } catch (emailError) {
     //   console.error('Failed to send owner confirmation email:', emailError);
     // }
-    console.log('📧 [TESTING] Email would be sent to:', email);
+    // console.log('📧 [TESTING] Email would be sent to:', email);
 
     // Send notification to admin
     const adminEmailSubject = `New Lab Owner Registration: ${lab_name}`;
@@ -876,7 +992,7 @@ exports.registerOwner = async (req, res) => {
     // } catch (emailError) {
     //   console.error('Failed to send admin notification email:', emailError);
     // }
-    console.log('📧 [TESTING] Admin notification email would be sent');
+    // console.log('📧 [TESTING] Admin notification email would be sent');
 
     // Create notification for admin
     try {
@@ -900,7 +1016,6 @@ exports.registerOwner = async (req, res) => {
         name: `${full_name.first} ${full_name.last}`,
         email,
         lab_name,
-        username,
         status: 'pending'
       }
     });

@@ -12,7 +12,7 @@ const testSchema = new mongoose.Schema({
   reference_range: String,
   price: Number,
   owner_id: { type: mongoose.Schema.Types.ObjectId, ref: 'LabOwner', required: true },
-  turnaround_time: String,
+  turnaround_time: Number,
   collection_time: String,
   reagent: String
 }, {

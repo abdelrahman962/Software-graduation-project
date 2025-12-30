@@ -426,4 +426,32 @@ router.get('/results', authMiddleware, roleMiddleware(['owner']), ownerControlle
  */
 router.get('/invoices', authMiddleware, roleMiddleware(['owner']), ownerController.getAllInvoices);
 
+/**
+ * @route   GET /api/owner/invoices/:invoiceId
+ * @desc    Get invoice details by invoice ID
+ * @access  Private (Owner)
+ */
+router.get('/invoices/:invoiceId', authMiddleware, roleMiddleware(['owner']), ownerController.getInvoiceDetails);
+
+/**
+ * @route   GET /api/owner/invoices/order/:orderId
+ * @desc    Get invoice by order ID
+ * @access  Private (Owner)
+ */
+router.get('/invoices/order/:orderId', authMiddleware, roleMiddleware(['owner']), ownerController.getInvoiceByOrderId);
+
+/**
+ * @route   GET /api/owner/audit-logs
+ * @desc    Get audit logs
+ * @access  Private (Owner)
+ */
+router.get('/audit-logs', authMiddleware, roleMiddleware(['owner']), ownerController.getAuditLogs);
+
+/**
+ * @route   GET /api/owner/audit-logs/actions
+ * @desc    Get available audit log actions
+ * @access  Private (Owner)
+ */
+router.get('/audit-logs/actions', authMiddleware, roleMiddleware(['owner']), ownerController.getAuditLogActions);
+
 module.exports = router;

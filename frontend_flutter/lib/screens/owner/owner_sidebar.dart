@@ -5,19 +5,46 @@ import '../../providers/owner_auth_provider.dart';
 import '../../config/theme.dart';
 
 class OwnerSidebar extends StatelessWidget {
-  final int selectedIndex;
-  final Function(int) onItemSelected;
+  final int? selectedIndex;
+  final Function(int)? onItemSelected;
 
-  const OwnerSidebar({
-    super.key,
-    required this.selectedIndex,
-    required this.onItemSelected,
-  });
+  const OwnerSidebar({super.key, this.selectedIndex, this.onItemSelected});
+
+  int _getSelectedIndex(BuildContext context) {
+    if (selectedIndex != null) {
+      return selectedIndex!;
+    }
+    final location = GoRouterState.of(context).uri.toString();
+    if (location == '/owner/dashboard') return 0;
+    if (location == '/owner/staff') return 1;
+    if (location == '/owner/doctors') return 2;
+    if (location == '/owner/orders') return 3;
+    if (location == '/owner/tests') return 4;
+    if (location == '/owner/devices') return 5;
+    if (location == '/owner/inventory') return 6;
+    if (location == '/owner/audit-logs') return 7;
+    if (location == '/owner/profile') return 8;
+    return 0; // Default to dashboard
+  }
+
+  int _getRouteIndex(String route) {
+    if (route == '/owner/dashboard') return 0;
+    if (route == '/owner/staff') return 1;
+    if (route == '/owner/doctors') return 2;
+    if (route == '/owner/orders') return 3;
+    if (route == '/owner/tests') return 4;
+    if (route == '/owner/devices') return 5;
+    if (route == '/owner/inventory') return 6;
+    if (route == '/owner/audit-logs') return 7;
+    if (route == '/owner/profile') return 8;
+    return 0;
+  }
 
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<OwnerAuthProvider>(context);
     final user = authProvider.user;
+    final selectedIndex = _getSelectedIndex(context);
 
     return Container(
       width: 280,
@@ -42,51 +69,96 @@ class OwnerSidebar extends StatelessWidget {
                 if (user != null) ...[
                   const SizedBox(height: 8),
                   Text(
-                    user.email,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    'Welcome back, ${user.displayName}',
+                    style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.9),
+                      fontSize: 14,
                     ),
+                    textAlign: TextAlign.center,
                   ),
                 ],
               ],
             ),
           ),
-
-          // Navigation Sections
+          const SizedBox(height: 16),
+          // Navigation Items
           Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildNavSection(context, 'OVERVIEW', [
-                    _buildNavItem(context, 'Dashboard', Icons.dashboard, 0),
-                  ]),
-                  _buildNavSection(context, 'MANAGEMENT', [
-                    _buildNavItem(context, 'Staff', Icons.people, 1),
-                    _buildNavItem(
-                      context,
-                      'Doctors',
-                      Icons.medical_services,
-                      2,
-                    ),
-                    _buildNavItem(context, 'Orders', Icons.assignment, 3),
-                    _buildNavItem(context, 'Tests', Icons.science, 4),
-                    _buildNavItem(context, 'Devices', Icons.devices, 5),
-                    _buildNavItem(context, 'Inventory', Icons.inventory, 6),
-                    _buildNavItem(context, 'Audit Logs', Icons.history, 7),
-                  ]),
-                  _buildNavSection(context, 'SYSTEM', [
-                    _buildNavItem(context, 'My Profile', Icons.person, 8),
-                    _buildNavItem(
-                      context,
-                      'Logout',
-                      Icons.logout,
-                      -1,
-                      onTap: () => _logout(context),
-                    ),
-                  ]),
-                ],
-              ),
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              children: [
+                _buildNavItem(
+                  context,
+                  'Dashboard',
+                  Icons.dashboard,
+                  '/owner/dashboard',
+                  selectedIndex == 0,
+                ),
+                _buildNavItem(
+                  context,
+                  'Staff',
+                  Icons.people,
+                  '/owner/staff',
+                  selectedIndex == 1,
+                ),
+                _buildNavItem(
+                  context,
+                  'Doctors',
+                  Icons.medical_services,
+                  '/owner/doctors',
+                  selectedIndex == 2,
+                ),
+                _buildNavItem(
+                  context,
+                  'Orders',
+                  Icons.assignment,
+                  '/owner/orders',
+                  selectedIndex == 3,
+                ),
+                _buildNavItem(
+                  context,
+                  'Tests',
+                  Icons.science,
+                  '/owner/tests',
+                  selectedIndex == 4,
+                ),
+                _buildNavItem(
+                  context,
+                  'Devices',
+                  Icons.devices,
+                  '/owner/devices',
+                  selectedIndex == 5,
+                ),
+                _buildNavItem(
+                  context,
+                  'Inventory',
+                  Icons.inventory,
+                  '/owner/inventory',
+                  selectedIndex == 6,
+                ),
+                _buildNavItem(
+                  context,
+                  'Audit Logs',
+                  Icons.history,
+                  '/owner/audit-logs',
+                  selectedIndex == 7,
+                ),
+                _buildNavItem(
+                  context,
+                  'My Profile',
+                  Icons.person,
+                  '/owner/profile',
+                  selectedIndex == 8,
+                ),
+                const SizedBox(height: 16),
+                _buildNavItem(
+                  context,
+                  'Logout',
+                  Icons.logout,
+                  '/login',
+                  false,
+                  onTap: () => _logout(context),
+                ),
+              ],
             ),
           ),
         ],
@@ -94,41 +166,33 @@ class OwnerSidebar extends StatelessWidget {
     );
   }
 
-  Widget _buildNavSection(
-    BuildContext context,
-    String title,
-    List<Widget> items,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
-          child: Text(
-            title,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: AppTheme.textLight,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-            ),
-          ),
-        ),
-        ...items,
-      ],
-    );
+  void _logout(BuildContext context) {
+    final authProvider = Provider.of<OwnerAuthProvider>(context, listen: false);
+    authProvider.logout();
+    context.go('/login');
   }
 
   Widget _buildNavItem(
     BuildContext context,
     String title,
     IconData icon,
-    int index, {
+    String route,
+    bool isSelected, {
     VoidCallback? onTap,
   }) {
-    final isSelected = selectedIndex == index;
-
     return InkWell(
-      onTap: onTap ?? () => onItemSelected(index),
+      onTap:
+          onTap ??
+          () {
+            if (onItemSelected != null) {
+              // For tab-based navigation (dashboard)
+              final index = _getRouteIndex(route);
+              onItemSelected!(index);
+            } else {
+              // For route-based navigation (separate screens)
+              context.go(route);
+            }
+          },
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -162,17 +226,5 @@ class OwnerSidebar extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  void _logout(BuildContext context) async {
-    final authProvider = Provider.of<OwnerAuthProvider>(context, listen: false);
-    await authProvider.logout();
-    if (context.mounted) {
-      // Small delay to ensure logout is complete before navigation
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (context.mounted) {
-        context.go('/');
-      }
-    }
   }
 }

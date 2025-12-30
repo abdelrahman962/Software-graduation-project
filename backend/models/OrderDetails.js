@@ -17,7 +17,7 @@ const orderDetailSchema = new mongoose.Schema({
   
   status: { 
     type: String, 
-    enum: ['pending', 'assigned', 'urgent', 'collected', 'in_progress', 'completed'], 
+    enum: ['pending', 'assigned', 'collected', 'in_progress', 'completed'], 
     default: 'pending' 
   }
 }, {

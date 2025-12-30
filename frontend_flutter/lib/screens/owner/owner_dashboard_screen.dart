@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
-import 'dart:math';
 import '../../utils/page_title_helper.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../providers/owner_auth_provider.dart';
@@ -20,11 +19,11 @@ import '../../config/api_config.dart';
 import '../../widgets/confirmation_dialog.dart';
 import '../../widgets/system_feedback_form.dart';
 import '../../utils/responsive_utils.dart' as app_responsive;
-import 'owner_sidebar.dart';
+import '../../widgets/owner_sidebar.dart';
 import 'owner_profile_screen.dart';
 
 class OwnerDashboardScreen extends StatefulWidget {
-  final int? initialTab;
+  final String? initialTab;
 
   const OwnerDashboardScreen({super.key, this.initialTab});
 
@@ -32,7 +31,8 @@ class OwnerDashboardScreen extends StatefulWidget {
   State<OwnerDashboardScreen> createState() => _OwnerDashboardScreenState();
 }
 
-class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
+class _OwnerDashboardScreenState extends State<OwnerDashboardScreen>
+    with TickerProviderStateMixin {
   Map<String, dynamic>? _dashboardData;
   bool _isLoading = true;
   int _selectedIndex = 0;
@@ -42,15 +42,60 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
   List<Map<String, dynamic>> _devices = [];
   List<Map<String, dynamic>> _orders = [];
 
+  // Loading states for tabs
+  bool _isStaffLoading = false;
+  bool _isDoctorsLoading = false;
+  bool _isTestsLoading = false;
+  bool _isDevicesLoading = false;
+  bool _isOrdersLoading = false;
+
   // Reports data
   Map<String, dynamic>? _reportsData;
-  bool _isLoadingReports = false; // Financial reports loading state
+  bool _isReportsLoading = false;
+  String _selectedReportPeriod = 'monthly';
+
+  // Audit logs data
+  List<Map<String, dynamic>> _auditLogs = [];
+  bool _isAuditLogsLoading = false;
+  int _auditLogsPage = 1;
+  int _auditLogsTotalPages = 1;
 
   // Error states
   String? _ordersError;
 
+  // Tab controller for sidebar navigation
+  late TabController _tabController;
+
   // Sidebar state
   bool _isSidebarOpen = true;
+
+  // Tab routes for URL navigation
+  static const Map<int, String> _tabRoutes = {
+    0: 'dashboard',
+    1: 'staff',
+    2: 'doctors',
+    3: 'orders',
+    4: 'tests',
+    5: 'devices',
+    6: 'inventory',
+    7: 'reports',
+    8: 'audit-logs',
+    9: 'profile',
+  };
+
+  // Reverse map for getting index from tab name
+  static const Map<String, int> _tabIndices = {
+    'dashboard': 0,
+    'staff': 1,
+    'doctors': 2,
+    'orders': 3,
+    'tests': 4,
+    'devices': 5,
+    'inventory': 6,
+    'reports': 7,
+    'audit-logs': 8,
+    'profile': 9,
+  };
 
   // Auth loading state
   bool _isAuthLoading = true;
@@ -81,6 +126,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     'Inventory',
     'Reports',
     'Audit Logs',
+    'My Profile',
   ];
 
   final List<IconData> _menuIcons = [
@@ -93,13 +139,36 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     Icons.inventory,
     Icons.analytics,
     Icons.history,
+    Icons.person,
   ];
+
+  String _safeGetString(dynamic data, [String fallback = 'N/A']) {
+    if (data is String) {
+      return data;
+    } else if (data is Map<String, dynamic>) {
+      // Try common keys that might contain the string value
+      return data['name'] ?? data['first'] ?? data.toString();
+    }
+    return fallback;
+  }
 
   @override
   void initState() {
     super.initState();
     PageTitleHelper.updateTitle('Owner Dashboard - MedLab System');
-    _selectedIndex = widget.initialTab ?? 0;
+
+    // Set initial tab based on URL parameter
+    final initialIndex = widget.initialTab != null
+        ? _tabIndices[widget.initialTab] ?? 0
+        : 0;
+
+    _selectedIndex = initialIndex;
+
+    // Initialize TabController
+    _tabController = TabController(length: 10, vsync: this);
+    _tabController.index = _selectedIndex;
+    _tabController.addListener(_handleTabChange);
+
     _initializeAuthAndDashboard();
   }
 
@@ -140,15 +209,22 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
   }
 
   Future<void> _loadStaff() async {
+    if (_isStaffLoading) return; // Prevent multiple simultaneous loads
+
+    setState(() => _isStaffLoading = true);
     try {
       final response = await OwnerApiService.getStaff();
-      if (response['staff'] != null) {
+      if (mounted) {
         setState(() {
-          _staff = List<Map<String, dynamic>>.from(response['staff']);
+          _staff = response['staff'] != null
+              ? List<Map<String, dynamic>>.from(response['staff'])
+              : [];
+          _isStaffLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _isStaffLoading = false);
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error loading staff: $e')));
@@ -157,15 +233,22 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
   }
 
   Future<void> _loadDoctors() async {
+    if (_isDoctorsLoading) return; // Prevent multiple simultaneous loads
+
+    setState(() => _isDoctorsLoading = true);
     try {
       final response = await OwnerApiService.getDoctors();
-      if (response['doctors'] != null) {
+      if (mounted) {
         setState(() {
-          _doctors = List<Map<String, dynamic>>.from(response['doctors']);
+          _doctors = response['doctors'] != null
+              ? List<Map<String, dynamic>>.from(response['doctors'])
+              : [];
+          _isDoctorsLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _isDoctorsLoading = false);
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error loading doctors: $e')));
@@ -174,15 +257,22 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
   }
 
   Future<void> _loadTests() async {
+    if (_isTestsLoading) return; // Prevent multiple simultaneous loads
+
+    setState(() => _isTestsLoading = true);
     try {
       final response = await OwnerApiService.getTests();
-      if (response['tests'] != null) {
+      if (mounted) {
         setState(() {
-          _tests = List<Map<String, dynamic>>.from(response['tests']);
+          _tests = response['tests'] != null
+              ? List<Map<String, dynamic>>.from(response['tests'])
+              : [];
+          _isTestsLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _isTestsLoading = false);
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error loading tests: $e')));
@@ -191,15 +281,22 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
   }
 
   Future<void> _loadDevices() async {
+    if (_isDevicesLoading) return; // Prevent multiple simultaneous loads
+
+    setState(() => _isDevicesLoading = true);
     try {
       final response = await OwnerApiService.getDevices();
-      if (response['devices'] != null) {
+      if (mounted) {
         setState(() {
-          _devices = List<Map<String, dynamic>>.from(response['devices']);
+          _devices = response['devices'] != null
+              ? List<Map<String, dynamic>>.from(response['devices'])
+              : [];
+          _isDevicesLoading = false;
         });
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _isDevicesLoading = false);
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error loading devices: $e')));
@@ -323,6 +420,81 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
 
     if (_isSidebarOpen || canShowSidebar) {
       setState(() => _isSidebarOpen = !_isSidebarOpen);
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void _handleTabChange() {
+    setState(() {
+      _selectedIndex = _tabController.index;
+    });
+
+    // Update URL when tab changes
+    final tabRoute = _tabRoutes[_tabController.index];
+    if (tabRoute != null) {
+      final targetPath = '/owner/dashboard/$tabRoute';
+      final currentPath = GoRouter.of(
+        context,
+      ).routerDelegate.currentConfiguration.uri.path;
+      if (currentPath != targetPath) {
+        GoRouter.of(context).go(targetPath);
+      }
+    }
+
+    // Load data when switching to specific tabs
+    switch (_tabController.index) {
+      case 1: // Staff tab
+        if (_staff.isEmpty && !_isStaffLoading) {
+          _loadStaff();
+        }
+        break;
+      case 2: // Doctors tab
+        if (_doctors.isEmpty && !_isDoctorsLoading) {
+          _loadDoctors();
+        }
+        break;
+      case 3: // Orders tab
+        if (_orders.isEmpty && !_isOrdersLoading) {
+          _loadOrders();
+        }
+        break;
+      case 4: // Tests tab
+        if (_tests.isEmpty && !_isTestsLoading) {
+          _loadTests();
+        }
+        break;
+      case 5: // Devices tab
+        if (_devices.isEmpty && !_isDevicesLoading) {
+          _loadDevices();
+        }
+        break;
+      case 7: // Reports tab
+        if (_reportsData == null && !_isReportsLoading) {
+          _loadReports();
+        }
+        break;
+      case 8: // Audit Logs tab
+        if (_auditLogs.isEmpty && !_isAuditLogsLoading) {
+          _loadAuditLogs();
+        }
+        break;
+    }
+  }
+
+  void _logout(BuildContext context) async {
+    final authProvider = Provider.of<OwnerAuthProvider>(context, listen: false);
+    await authProvider.logout();
+    if (context.mounted) {
+      // Small delay to ensure logout is complete before navigation
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (context.mounted) {
+        context.go('/');
+      }
     }
   }
 
@@ -474,7 +646,12 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                   child: OwnerSidebar(
                     selectedIndex: _selectedIndex,
                     onItemSelected: (index) {
-                      setState(() => _selectedIndex = index);
+                      if (index >= 0 && index < _tabController.length) {
+                        _tabController.animateTo(index);
+                      } else if (index == -1) {
+                        // Handle logout
+                        _logout(context);
+                      }
                     },
                   ),
                 ),
@@ -879,7 +1056,12 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                 children: List.generate(_menuItems.length, (index) {
                   final isSelected = _selectedIndex == index;
                   return AnimatedCard(
-                    onTap: () => setState(() => _selectedIndex = index),
+                    onTap: () {
+                      if (index >= 0 && index < _tabController.length) {
+                        _tabController.animateTo(index);
+                        Navigator.of(context).pop(); // Close drawer
+                      }
+                    },
                     child: Container(
                       margin: const EdgeInsets.symmetric(
                         horizontal: 8,
@@ -914,7 +1096,9 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                           alpha: 0.1,
                         ),
                         onTap: () {
-                          setState(() => _selectedIndex = index);
+                          if (index >= 0 && index < _tabController.length) {
+                            _tabController.animateTo(index);
+                          }
                           Navigator.pop(context); // Close drawer
                         },
                       ),
@@ -935,39 +1119,41 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
         return _buildDashboardView();
       case 1:
         // Load staff when navigating to staff tab
-        if (_staff.isEmpty) {
-          _loadStaffInBackground();
+        if (_staff.isEmpty && !_isStaffLoading) {
+          _loadStaff();
         }
         return _buildStaffView();
       case 2:
         // Load doctors when navigating to doctors tab
-        if (_doctors.isEmpty) {
-          _loadDoctorsInBackground();
+        if (_doctors.isEmpty && !_isDoctorsLoading) {
+          _loadDoctors();
         }
         return _buildDoctorsView();
       case 3:
         // Load orders when navigating to orders tab
-        if (_orders.isEmpty) {
-          _loadOrdersInBackground();
+        if (_orders.isEmpty && !_isOrdersLoading) {
+          _loadOrders();
         }
         return _buildOrdersView();
       case 4:
         // Load tests when navigating to tests tab
-        if (_tests.isEmpty) {
-          _loadTestsInBackground();
+        if (_tests.isEmpty && !_isTestsLoading) {
+          _loadTests();
         }
         return _buildTestsView();
       case 5:
         // Load devices when navigating to devices tab
-        if (_devices.isEmpty) {
-          _loadDevicesInBackground();
+        if (_devices.isEmpty && !_isDevicesLoading) {
+          _loadDevices();
         }
         return _buildDevicesView();
       case 6:
         return _buildInventoryView();
       case 7:
-        return _buildAuditLogsView();
+        return _buildReportsView();
       case 8:
+        return _buildAuditLogsView();
+      case 9:
         return const OwnerProfileScreen();
       default:
         return _buildDashboardView();
@@ -1244,10 +1430,10 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
 
     // Determine cross axis count based on screen size
-    // Mobile (< 600px): 1 column
-    // Tablet (600px - 1024px): 2 columns
-    // Desktop (> 1024px): 2 columns
-    final crossAxisCount = screenWidth < 600 ? 1 : 2;
+    // Mobile (< 800px): 1 column
+    // Tablet/Desktop (>= 800px): 2 columns
+    // Use a higher threshold to ensure enough space for content
+    final crossAxisCount = screenWidth < 800 ? 1 : 2;
 
     final stats = [
       {
@@ -1413,7 +1599,13 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                 SizedBox(height: isVerySmall ? 20 : 32),
 
                 // Orders List
-                ...(_ordersError != null
+                ...(_isOrdersLoading
+                    ? [
+                        AppAnimations.fadeIn(
+                          const Center(child: CircularProgressIndicator()),
+                        ),
+                      ]
+                    : _ordersError != null
                     ? [
                         AppAnimations.fadeIn(
                           Center(
@@ -1507,7 +1699,12 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     final orderDate = DateTime.parse(order['order_date']);
     final status = order['status'] ?? 'unknown';
     final testCount = order['test_count'] ?? 0;
-    final labName = order['owner_id']?['lab_name'] ?? 'Medical Lab';
+    // Get lab name from auth provider or use default
+    final authProvider = Provider.of<OwnerAuthProvider>(context, listen: false);
+    final labName = authProvider.user?.labName ?? 'Medical Lab';
+    // Safely extract string values that might be Maps
+    final patientName = _safeGetString(order['patient_name'], 'N/A');
+    final doctorName = _safeGetString(order['doctor_name'], 'Not Assigned');
 
     Color statusColor;
     IconData statusIcon;
@@ -1637,7 +1834,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                         ],
                       ),
                       Text(
-                        order['patient_name'] ?? 'N/A',
+                        patientName,
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -1670,15 +1867,17 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                           ),
                         ],
                       ),
+
+                      // Handle doctor_name which could be a string or a map
                       Text(
-                        order['doctor_name'] ?? 'Not Assigned',
+                        doctorName,
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: order['doctor_name'] != null
+                          color: doctorName != 'Not Assigned'
                               ? AppTheme.textDark
                               : Colors.grey[500],
-                          fontStyle: order['doctor_name'] != null
+                          fontStyle: doctorName != 'Not Assigned'
                               ? FontStyle.normal
                               : FontStyle.italic,
                         ),
@@ -1707,7 +1906,12 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: () => _showOrderDetailsWithInvoice(order),
+                    onPressed: () {
+                      final orderId = order['order_id'] ?? order['_id'];
+                      if (orderId != null) {
+                        context.go('/owner/order-details?orderId=$orderId');
+                      }
+                    },
                     icon: const Icon(Icons.science, size: 18),
                     label: const Text('View Details'),
                     style: ElevatedButton.styleFrom(
@@ -1723,7 +1927,11 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => _showInvoiceDetails(order),
+                    onPressed: () {
+                      context.go(
+                        '/owner/invoice-details?orderId=${order['order_id'] ?? order['_id']}',
+                      );
+                    },
                     icon: const Icon(Icons.receipt_long, size: 18),
                     label: const Text('View Invoice'),
                     style: OutlinedButton.styleFrom(
@@ -1777,12 +1985,37 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
 
   List<Widget> _buildTestListWithStaff(List<dynamic> orderDetails) {
     return orderDetails.take(5).map((detail) {
-      final testName = detail['test_name'] ?? 'Unknown Test';
-      final assignedStaff = detail['staff_id'];
-      final staffName = assignedStaff != null
-          ? '${assignedStaff['full_name']?['first'] ?? ''} ${assignedStaff['full_name']?['last'] ?? ''}'
-                .trim()
-          : 'Unassigned';
+      // Handle test_name which could be a string or extracted from test_id
+      String testName;
+      final testNameData = detail['test_name'];
+      if (testNameData is String) {
+        testName = testNameData;
+      } else {
+        // Fallback to extracting from test_id if it's populated
+        final testId = detail['test_id'];
+        if (testId is Map<String, dynamic>) {
+          testName = testId['test_name'] ?? 'Unknown Test';
+        } else {
+          testName = 'Unknown Test';
+        }
+      }
+
+      // Handle staff_name which could be a string or a map
+      String staffName;
+      final staffNameData = detail['staff_name'];
+      if (staffNameData is String) {
+        staffName = staffNameData;
+      } else if (staffNameData is Map<String, dynamic>) {
+        staffName =
+            '${staffNameData['first'] ?? ''} ${staffNameData['last'] ?? ''}'
+                .trim();
+      } else {
+        staffName = 'Unassigned';
+      }
+
+      if (staffName.isEmpty) {
+        staffName = 'Unassigned';
+      }
 
       return Container(
         margin: const EdgeInsets.only(bottom: 8),
@@ -1809,23 +2042,23 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: assignedStaff != null
+                color: staffName != 'Unassigned'
                     ? AppTheme.successGreen.withValues(alpha: 0.1)
                     : AppTheme.warningYellow.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                assignedStaff != null ? 'Assigned' : 'Unassigned',
+                staffName != 'Unassigned' ? 'Assigned' : 'Unassigned',
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w500,
-                  color: assignedStaff != null
+                  color: staffName != 'Unassigned'
                       ? AppTheme.successGreen
                       : AppTheme.warningYellow,
                 ),
               ),
             ),
-            if (assignedStaff != null) ...[
+            if (staffName != 'Unassigned') ...[
               const SizedBox(width: 8),
               Icon(Icons.person, size: 14, color: AppTheme.primaryBlue),
               const SizedBox(width: 4),
@@ -1844,6 +2077,7 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     }).toList();
   }
 
+  // ignore: unused_element
   void _showOrderDetailsWithInvoice(dynamic order) {
     showDialog(
       context: context,
@@ -1856,8 +2090,14 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildDetailRow('Patient', order['patient_name'] ?? 'N/A'),
-              _buildDetailRow('Doctor', order['doctor_name'] ?? 'Not Assigned'),
+              _buildDetailRow(
+                'Patient',
+                _safeGetString(order['patient_name'], 'N/A'),
+              ),
+              _buildDetailRow(
+                'Doctor',
+                _safeGetString(order['doctor_name'], 'Not Assigned'),
+              ),
               _buildDetailRow(
                 'Status',
                 _getStatusText(order['status'] ?? 'pending'),
@@ -2282,10 +2522,10 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
 
     // Determine cross axis count based on screen size
-    // Mobile (< 600px): 1 column
-    // Tablet (600px - 1024px): 2 columns
-    // Desktop (> 1024px): 2 columns
-    final crossAxisCount = screenWidth < 600 ? 1 : 2;
+    // Mobile (< 800px): 1 column
+    // Tablet/Desktop (>= 800px): 2 columns
+    // Use a higher threshold to ensure enough space for content
+    final crossAxisCount = screenWidth < 800 ? 1 : 2;
 
     final actions = [
       {
@@ -2502,7 +2742,9 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
           ),
         ),
         Expanded(
-          child: filteredStaff.isEmpty
+          child: _isStaffLoading
+              ? const Center(child: CircularProgressIndicator())
+              : filteredStaff.isEmpty
               ? Center(
                   child: Text(
                     _staffSearchController.text.isNotEmpty
@@ -2637,7 +2879,9 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
           ),
         ),
         Expanded(
-          child: filteredDoctors.isEmpty
+          child: _isDoctorsLoading
+              ? const Center(child: CircularProgressIndicator())
+              : filteredDoctors.isEmpty
               ? Center(
                   child: Text(
                     _doctorSearchController.text.isNotEmpty
@@ -2734,7 +2978,9 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
           ),
         ),
         Expanded(
-          child: filteredTests.isEmpty
+          child: _isTestsLoading
+              ? const Center(child: CircularProgressIndicator())
+              : filteredTests.isEmpty
               ? Center(
                   child: Text(
                     _testSearchController.text.isNotEmpty
@@ -2836,7 +3082,9 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
           ),
         ),
         Expanded(
-          child: filteredDevices.isEmpty
+          child: _isDevicesLoading
+              ? const Center(child: CircularProgressIndicator())
+              : filteredDevices.isEmpty
               ? Center(
                   child: Text(
                     _deviceSearchController.text.isNotEmpty
@@ -2860,448 +3108,6 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
   Widget _buildInventoryView() {
     // Display inventory management content directly in the dashboard
     return _InventoryManagementWidget();
-  }
-
-  Widget _buildReportsView() {
-    // Load reports data if not already loaded
-    if (_reportsData == null && !_isLoadingReports) {
-      _loadReportsData();
-    }
-
-    if (_isLoadingReports) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_reportsData == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.grey),
-            const SizedBox(height: 16),
-            const Text('Failed to load reports data'),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _loadReportsData,
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // Extract financial data
-    final revenueData = _reportsData?['revenue'];
-    final revenue = revenueData is Map
-        ? (revenueData['total'] ?? 0)
-        : (_dashboardData?['financials']?['monthlyRevenue'] ?? 0);
-    final expenses = _reportsData?['expenses'] ?? {};
-    final subscriptionExpenses = expenses['subscriptions'] ?? 0;
-    final inventoryExpenses = expenses['inventory'] ?? 0;
-    final salaryExpenses = expenses['salaries'] ?? 0;
-    final totalExpenses =
-        subscriptionExpenses + inventoryExpenses + salaryExpenses;
-    final profit = revenue - totalExpenses;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Row(
-            children: [
-              const Icon(Icons.analytics, size: 32, color: Colors.blue),
-              const SizedBox(width: 16),
-              Text(
-                'Financial Reports',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 32),
-
-          // Summary Cards
-          Row(
-            children: [
-              Expanded(
-                child: _buildFinancialCard(
-                  'Total Revenue',
-                  '\$${revenue.toStringAsFixed(2)}',
-                  Icons.trending_up,
-                  Colors.green,
-                  'From patient orders',
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildFinancialCard(
-                  'Total Expenses',
-                  '\$${totalExpenses.toStringAsFixed(2)}',
-                  Icons.trending_down,
-                  Colors.red,
-                  'Subscriptions + Inventory + Salaries',
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildFinancialCard(
-                  'Net Profit',
-                  '\$${profit.toStringAsFixed(2)}',
-                  profit >= 0 ? Icons.thumb_up : Icons.thumb_down,
-                  profit >= 0 ? Colors.green : Colors.red,
-                  profit >= 0 ? 'Positive cash flow' : 'Negative cash flow',
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 32),
-
-          // Charts Section
-          Text(
-            'Financial Overview',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Revenue vs Expenses Bar Chart
-              Expanded(
-                flex: 3,
-                child: Card(
-                  elevation: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Revenue vs Expenses',
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 24),
-                        SizedBox(
-                          height: 300,
-                          child: BarChart(
-                            BarChartData(
-                              alignment: BarChartAlignment.spaceAround,
-                              maxY:
-                                  [
-                                    revenue,
-                                    totalExpenses,
-                                  ].reduce((a, b) => a > b ? a : b) *
-                                  1.2,
-                              barTouchData: BarTouchData(
-                                enabled: true,
-                                touchTooltipData: BarTouchTooltipData(
-                                  getTooltipItem:
-                                      (group, groupIndex, rod, rodIndex) {
-                                        return BarTooltipItem(
-                                          '\$${rod.toY.toStringAsFixed(2)}',
-                                          const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        );
-                                      },
-                                ),
-                              ),
-                              titlesData: FlTitlesData(
-                                show: true,
-                                bottomTitles: AxisTitles(
-                                  sideTitles: SideTitles(
-                                    showTitles: true,
-                                    getTitlesWidget: (value, meta) {
-                                      switch (value.toInt()) {
-                                        case 0:
-                                          return const Padding(
-                                            padding: EdgeInsets.only(top: 8),
-                                            child: Text(
-                                              'Revenue',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          );
-                                        case 1:
-                                          return const Padding(
-                                            padding: EdgeInsets.only(top: 8),
-                                            child: Text(
-                                              'Expenses',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          );
-                                        default:
-                                          return const Text('');
-                                      }
-                                    },
-                                  ),
-                                ),
-                                leftTitles: AxisTitles(
-                                  sideTitles: SideTitles(
-                                    showTitles: true,
-                                    reservedSize: 60,
-                                    getTitlesWidget: (value, meta) {
-                                      return Text(
-                                        '\$${value.toStringAsFixed(0)}',
-                                        style: const TextStyle(fontSize: 10),
-                                      );
-                                    },
-                                  ),
-                                ),
-                                topTitles: const AxisTitles(
-                                  sideTitles: SideTitles(showTitles: false),
-                                ),
-                                rightTitles: const AxisTitles(
-                                  sideTitles: SideTitles(showTitles: false),
-                                ),
-                              ),
-                              gridData: FlGridData(
-                                show: true,
-                                drawVerticalLine: false,
-                                horizontalInterval:
-                                    (revenue > totalExpenses
-                                        ? revenue
-                                        : totalExpenses) /
-                                    5,
-                              ),
-                              borderData: FlBorderData(show: false),
-                              barGroups: [
-                                BarChartGroupData(
-                                  x: 0,
-                                  barRods: [
-                                    BarChartRodData(
-                                      toY: revenue.toDouble(),
-                                      color: Colors.green,
-                                      width: 60,
-                                      borderRadius: const BorderRadius.vertical(
-                                        top: Radius.circular(8),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                BarChartGroupData(
-                                  x: 1,
-                                  barRods: [
-                                    BarChartRodData(
-                                      toY: totalExpenses.toDouble(),
-                                      color: Colors.red,
-                                      width: 60,
-                                      borderRadius: const BorderRadius.vertical(
-                                        top: Radius.circular(8),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              // Expense Breakdown Pie Chart
-              Expanded(
-                flex: 2,
-                child: Card(
-                  elevation: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Expense Breakdown',
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 24),
-                        SizedBox(
-                          height: 250,
-                          child: totalExpenses > 0
-                              ? PieChart(
-                                  PieChartData(
-                                    sectionsSpace: 2,
-                                    centerSpaceRadius: 50,
-                                    sections: [
-                                      PieChartSectionData(
-                                        value: subscriptionExpenses.toDouble(),
-                                        title:
-                                            '${((subscriptionExpenses / totalExpenses) * 100).toStringAsFixed(1)}%',
-                                        color: Colors.blue,
-                                        radius: 70,
-                                        titleStyle: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                      PieChartSectionData(
-                                        value: inventoryExpenses.toDouble(),
-                                        title:
-                                            '${((inventoryExpenses / totalExpenses) * 100).toStringAsFixed(1)}%',
-                                        color: Colors.orange,
-                                        radius: 70,
-                                        titleStyle: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                      PieChartSectionData(
-                                        value: salaryExpenses.toDouble(),
-                                        title:
-                                            '${((salaryExpenses / totalExpenses) * 100).toStringAsFixed(1)}%',
-                                        color: Colors.purple,
-                                        radius: 70,
-                                        titleStyle: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                )
-                              : const Center(child: Text('No expense data')),
-                        ),
-                        const SizedBox(height: 16),
-                        // Legend
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildLegendItem(
-                              'Subscriptions',
-                              Colors.blue,
-                              subscriptionExpenses,
-                            ),
-                            const SizedBox(height: 8),
-                            _buildLegendItem(
-                              'Inventory',
-                              Colors.orange,
-                              inventoryExpenses,
-                            ),
-                            const SizedBox(height: 8),
-                            _buildLegendItem(
-                              'Salaries',
-                              Colors.purple,
-                              salaryExpenses,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 32),
-
-          // Detailed Breakdown
-          Text(
-            'Detailed Expense Breakdown',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          Card(
-            elevation: 2,
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  _buildExpenseRow('Subscriptions', subscriptionExpenses),
-                  const Divider(),
-                  _buildExpenseRow('Inventory', inventoryExpenses),
-                  const Divider(),
-                  _buildExpenseRow('Salaries', salaryExpenses),
-                  const Divider(height: 32),
-                  _buildExpenseRow(
-                    'Total Expenses',
-                    totalExpenses,
-                    isTotal: true,
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 32),
-
-          // Revenue Details
-          Text(
-            'Revenue Details',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          Card(
-            elevation: 2,
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Patient Orders',
-                        style: Theme.of(context).textTheme.bodyLarge,
-                      ),
-                      Text(
-                        '\$${revenue.toStringAsFixed(2)}',
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.green,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Revenue generated from completed patient test orders',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodySmall?.copyWith(color: Colors.grey),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 32),
-
-          // Refresh Button
-          Center(
-            child: ElevatedButton.icon(
-              onPressed: _loadReportsData,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Refresh Reports'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showStaffDialog([Map<String, dynamic>? staff]) async {
@@ -4463,6 +4269,38 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
   }
 
   // Orders management methods
+  Future<void> _loadOrders() async {
+    if (_isOrdersLoading) return; // Prevent multiple simultaneous loads
+
+    setState(() => _isOrdersLoading = true);
+    try {
+      final authProvider = Provider.of<OwnerAuthProvider>(
+        context,
+        listen: false,
+      );
+      ApiService.setAuthToken(authProvider.token);
+
+      final response = await OwnerApiService.getAllOrders(
+        status: _selectedStatus?.isNotEmpty == true ? _selectedStatus : null,
+      );
+
+      if (mounted) {
+        setState(() {
+          _orders = List<Map<String, dynamic>>.from(response['orders'] ?? []);
+          _ordersError = null;
+          _isOrdersLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _ordersError = 'Failed to load orders: $e';
+          _isOrdersLoading = false;
+        });
+      }
+    }
+  }
+
   Future<void> _loadOrdersInBackground() async {
     if (!mounted) return;
 
@@ -4489,6 +4327,384 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
           _ordersError = 'Failed to load orders: $e';
         });
       }
+    }
+  }
+
+  Future<void> _loadReports() async {
+    if (!mounted) return;
+
+    setState(() => _isReportsLoading = true);
+
+    try {
+      final authProvider = Provider.of<OwnerAuthProvider>(
+        context,
+        listen: false,
+      );
+      ApiService.setAuthToken(authProvider.token);
+
+      final response = await OwnerApiService.getReports(
+        period: _selectedReportPeriod,
+      );
+
+      if (mounted) {
+        // Transform backend response to frontend expected structure
+        final transformedData = _transformReportsData(response);
+        setState(() {
+          _reportsData = transformedData;
+          _isReportsLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isReportsLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load reports: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Map<String, dynamic> _transformReportsData(Map<String, dynamic> backendData) {
+    final orders = backendData['orders'] ?? {};
+    final revenue = backendData['revenue'] ?? {};
+    final expenses = backendData['expenses'] ?? {};
+
+    // Calculate additional metrics
+    final totalExpenses =
+        (expenses['salaries'] ?? 0) +
+        (expenses['subscriptions'] ?? 0) +
+        (expenses['inventory'] ?? 0);
+    final netProfit = (revenue['paid'] ?? 0) - totalExpenses;
+
+    return {
+      'financial': {
+        'totalRevenue': revenue['total'] ?? 0,
+        'monthlyRevenue': revenue['paid'] ?? 0, // Using paid as monthly for now
+        'totalExpenses': totalExpenses,
+        'netProfit': netProfit,
+      },
+      'orders': {
+        'totalOrders': orders['total'] ?? 0,
+        'completedOrders': orders['completed'] ?? 0,
+        'pendingOrders': orders['processing'] ?? 0,
+      },
+    };
+  }
+
+  Future<void> _loadAuditLogs({bool loadMore = false}) async {
+    if (!mounted) return;
+
+    if (!loadMore) {
+      setState(() => _isAuditLogsLoading = true);
+    }
+
+    try {
+      final authProvider = Provider.of<OwnerAuthProvider>(
+        context,
+        listen: false,
+      );
+      ApiService.setAuthToken(authProvider.token);
+
+      final response = await OwnerApiService.getAuditLogs(
+        page: loadMore ? _auditLogsPage + 1 : 1,
+        limit: 50,
+      );
+
+      if (mounted) {
+        final newLogs = List<Map<String, dynamic>>.from(
+          response['auditLogs'] ?? [],
+        );
+        final pagination = response['pagination'] ?? {};
+
+        setState(() {
+          if (loadMore) {
+            _auditLogs.addAll(newLogs);
+            _auditLogsPage = pagination['page'] ?? _auditLogsPage;
+          } else {
+            _auditLogs = newLogs;
+            _auditLogsPage = 1;
+          }
+          _auditLogsTotalPages = pagination['pages'] ?? 1;
+          _isAuditLogsLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isAuditLogsLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load audit logs: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _buildAuditLogsView() {
+    return Container(
+      color: Colors.grey[50],
+      child: Column(
+        children: [
+          // Header with filters
+          Container(
+            padding: const EdgeInsets.all(24),
+            color: Colors.white,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.history, color: AppTheme.primaryBlue, size: 28),
+                    const SizedBox(width: 12),
+                    const Text(
+                      'Audit Logs',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Monitor all system activities and staff actions',
+                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+
+          // Audit logs list
+          Expanded(
+            child: _isAuditLogsLoading && _auditLogs.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : _auditLogs.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.history_outlined,
+                          size: 80,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 24),
+                        const Text(
+                          'No Audit Logs Found',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Audit logs will appear here when staff perform actions',
+                          style: TextStyle(color: Colors.grey[600]),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton.icon(
+                          onPressed: _loadAuditLogs,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Refresh'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primaryBlue,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(24),
+                    itemCount:
+                        _auditLogs.length +
+                        (_auditLogsPage < _auditLogsTotalPages ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index == _auditLogs.length) {
+                        // Load more button
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Center(
+                            child: ElevatedButton(
+                              onPressed: _isAuditLogsLoading
+                                  ? null
+                                  : () => _loadAuditLogs(loadMore: true),
+                              child: _isAuditLogsLoading
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('Load More'),
+                            ),
+                          ),
+                        );
+                      }
+
+                      final log = _auditLogs[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  CircleAvatar(
+                                    backgroundColor: _getActionColor(
+                                      log['action'],
+                                    ),
+                                    child: Icon(
+                                      _getActionIcon(log['action']),
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          log['staff_name'] ?? 'Unknown',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                        Text(
+                                          'Employee #: ${log['employee_number'] ?? 'N/A'}',
+                                          style: TextStyle(
+                                            color: Colors.grey[600],
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Text(
+                                    _formatTimestamp(log['timestamp']),
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _getActionColor(
+                                    log['action'],
+                                  ).withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  log['action'] ?? 'Unknown Action',
+                                  style: TextStyle(
+                                    color: _getActionColor(log['action']),
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                log['message'] ?? 'No details available',
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                              if (log['table_name'] != null) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Table: ${log['table_name']}',
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 12,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getActionColor(String? action) {
+    switch (action?.toLowerCase()) {
+      case 'login':
+        return Colors.green;
+      case 'logout':
+        return Colors.grey;
+      case 'create':
+        return Colors.blue;
+      case 'update':
+        return Colors.orange;
+      case 'delete':
+        return Colors.red;
+      case 'view':
+        return Colors.purple;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  IconData _getActionIcon(String? action) {
+    switch (action?.toLowerCase()) {
+      case 'login':
+        return Icons.login;
+      case 'logout':
+        return Icons.logout;
+      case 'create':
+        return Icons.add;
+      case 'update':
+        return Icons.edit;
+      case 'delete':
+        return Icons.delete;
+      case 'view':
+        return Icons.visibility;
+      default:
+        return Icons.history;
+    }
+  }
+
+  String _formatTimestamp(String? timestamp) {
+    if (timestamp == null) return 'Unknown';
+    try {
+      final date = DateTime.parse(timestamp);
+      final now = DateTime.now();
+      final difference = now.difference(date);
+
+      if (difference.inDays == 0) {
+        return 'Today ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+      } else if (difference.inDays == 1) {
+        return 'Yesterday ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+      } else if (difference.inDays < 7) {
+        return '${difference.inDays} days ago';
+      } else {
+        return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+      }
+    } catch (e) {
+      return 'Unknown';
     }
   }
 
@@ -4553,895 +4769,389 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     }
   }
 
-  Color _getTestStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'pending':
-        return Colors.grey;
-      case 'assigned':
-        return Colors.blue;
-      case 'urgent':
-        return Colors.red;
-      case 'collected':
-        return Colors.orange;
-      case 'in_progress':
-        return Colors.purple;
-      case 'completed':
-        return Colors.green;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  void _showOrderDetails(BuildContext context, Map<String, dynamic> order) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 600, maxHeight: 700),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.primaryBlue,
-                      AppTheme.primaryBlue.withValues(alpha: 0.8),
-                    ],
-                  ),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(16),
-                    topRight: Radius.circular(16),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(
-                        Icons.assignment,
-                        color: Colors.white,
-                        size: 28,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Order Details',
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                          Text(
-                            '#${order['_id']?.toString().substring(0, min(8, order['_id']?.toString().length ?? 0)) ?? 'N/A'}',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.white.withValues(alpha: 0.9),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _getStatusColor(order['status'] ?? 'pending'),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        _getStatusText(order['status'] ?? 'pending'),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Content
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Order Information
-                      _buildDialogSection(
-                        'Order Information',
-                        Icons.info_outline,
-                        Colors.blue,
-                        [
-                          _buildInfoTile(
-                            Icons.calendar_today,
-                            'Order Date',
-                            order['order_date'] != null
-                                ? DateTime.parse(
-                                    order['order_date'],
-                                  ).toString().split(' ')[0]
-                                : 'N/A',
-                            Colors.blue,
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Patient & Doctor Information
-                      _buildDialogSection(
-                        'Patient & Doctor',
-                        Icons.people,
-                        Colors.green,
-                        [
-                          _buildInfoTile(
-                            Icons.person,
-                            'Patient',
-                            order['patient_name'] ?? 'N/A',
-                            Colors.blue,
-                          ),
-                          _buildInfoTile(
-                            Icons.medical_services,
-                            'Doctor',
-                            order['doctor_name'] ?? 'Not Assigned',
-                            Colors.green,
-                          ),
-                          if (order['requested_by_model'] != null)
-                            _buildInfoTile(
-                              Icons.person_add,
-                              'Requested by',
-                              order['requested_by_model'],
-                              AppTheme.secondaryTeal,
-                            ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Tests & Staff Assignments
-                      _buildDialogSection(
-                        'Tests & Staff Assignments',
-                        Icons.science,
-                        Colors.purple,
-                        [],
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      if (order['order_details'] != null &&
-                          order['order_details'] is List)
-                        ...List.from(
-                          order['order_details'],
-                        ).asMap().entries.map<Widget>((entry) {
-                          final detail = entry.value;
-                          final index = entry.key;
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Colors.white,
-                                  _getTestStatusColor(
-                                    detail['status'] ?? 'pending',
-                                  ).withValues(alpha: 0.05),
-                                ],
-                              ),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: _getTestStatusColor(
-                                  detail['status'] ?? 'pending',
-                                ).withValues(alpha: 0.3),
-                                width: 2,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.grey.withValues(alpha: 0.1),
-                                  blurRadius: 4,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Container(
-                                        width: 30,
-                                        height: 30,
-                                        decoration: BoxDecoration(
-                                          color: Colors.purple.withValues(
-                                            alpha: 0.1,
-                                          ),
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                        ),
-                                        child: Center(
-                                          child: Text(
-                                            '${index + 1}',
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.purple,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: Text(
-                                          detail['test_name'] ?? 'Unknown Test',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 14,
-                                            color: AppTheme.textDark,
-                                          ),
-                                        ),
-                                      ),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 10,
-                                          vertical: 4,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: _getTestStatusColor(
-                                            detail['status'] ?? 'pending',
-                                          ),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          detail['status']
-                                                  ?.toString()
-                                                  .toUpperCase() ??
-                                              'PENDING',
-                                          style: const TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey[50],
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          detail['staff_name'] != null
-                                              ? Icons.person
-                                              : Icons.person_off,
-                                          size: 16,
-                                          color: detail['staff_name'] != null
-                                              ? Colors.green[700]
-                                              : Colors.grey[500],
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Assigned Staff',
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  color: Colors.grey[600],
-                                                ),
-                                              ),
-                                              Text(
-                                                detail['staff_name'] ??
-                                                    'Not yet assigned',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w600,
-                                                  color:
-                                                      detail['staff_name'] !=
-                                                          null
-                                                      ? AppTheme.textDark
-                                                      : Colors.grey[500],
-                                                  fontStyle:
-                                                      detail['staff_name'] !=
-                                                          null
-                                                      ? FontStyle.normal
-                                                      : FontStyle.italic,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        if (detail['staff_employee_number'] !=
-                                            null)
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 6,
-                                              vertical: 2,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.blue[50],
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
-                                            ),
-                                            child: Text(
-                                              detail['staff_employee_number'],
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.blue[700],
-                                              ),
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-
-                                  // Test Result Section
-                                  if (detail['has_result'] == true) ...[
-                                    const SizedBox(height: 10),
-                                    Container(
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        gradient: LinearGradient(
-                                          colors: [
-                                            Colors.green[50]!,
-                                            Colors.green[100]!.withValues(
-                                              alpha: 0.3,
-                                            ),
-                                          ],
-                                        ),
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: Colors.green.withValues(
-                                            alpha: 0.3,
-                                          ),
-                                          width: 1.5,
-                                        ),
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Container(
-                                                padding: const EdgeInsets.all(
-                                                  4,
-                                                ),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.green,
-                                                  borderRadius:
-                                                      BorderRadius.circular(6),
-                                                ),
-                                                child: const Icon(
-                                                  Icons.check_circle,
-                                                  size: 14,
-                                                  color: Colors.white,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              const Text(
-                                                'Test Result Available',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Colors.green,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Container(
-                                            padding: const EdgeInsets.all(10),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white,
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                            ),
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    Expanded(
-                                                      child: Column(
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .start,
-                                                        children: [
-                                                          Text(
-                                                            'Result Value',
-                                                            style: TextStyle(
-                                                              fontSize: 10,
-                                                              color: Colors
-                                                                  .grey[600],
-                                                            ),
-                                                          ),
-                                                          const SizedBox(
-                                                            height: 2,
-                                                          ),
-                                                          Row(
-                                                            children: [
-                                                              Text(
-                                                                detail['result_value']
-                                                                        ?.toString() ??
-                                                                    'N/A',
-                                                                style: const TextStyle(
-                                                                  fontSize: 16,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                  color: AppTheme
-                                                                      .primaryBlue,
-                                                                ),
-                                                              ),
-                                                              if (detail['result_units'] !=
-                                                                  null) ...[
-                                                                const SizedBox(
-                                                                  width: 4,
-                                                                ),
-                                                                Text(
-                                                                  detail['result_units'],
-                                                                  style: TextStyle(
-                                                                    fontSize:
-                                                                        12,
-                                                                    color: Colors
-                                                                        .grey[700],
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            ],
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                    if (detail['result_reference_range'] !=
-                                                        null) ...[
-                                                      const SizedBox(width: 12),
-                                                      Expanded(
-                                                        child: Column(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            Text(
-                                                              'Reference Range',
-                                                              style: TextStyle(
-                                                                fontSize: 10,
-                                                                color: Colors
-                                                                    .grey[600],
-                                                              ),
-                                                            ),
-                                                            const SizedBox(
-                                                              height: 2,
-                                                            ),
-                                                            Text(
-                                                              detail['result_reference_range'],
-                                                              style: TextStyle(
-                                                                fontSize: 12,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                                color: Colors
-                                                                    .grey[700],
-                                                              ),
-                                                            ),
-                                                          ],
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ],
-                                                ),
-                                                if (detail['result_remarks'] !=
-                                                    null) ...[
-                                                  const SizedBox(height: 8),
-                                                  Container(
-                                                    padding:
-                                                        const EdgeInsets.all(8),
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.orange[50],
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            6,
-                                                          ),
-                                                      border: Border.all(
-                                                        color: Colors.orange
-                                                            .withValues(
-                                                              alpha: 0.2,
-                                                            ),
-                                                      ),
-                                                    ),
-                                                    child: Row(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        Icon(
-                                                          Icons
-                                                              .note_alt_outlined,
-                                                          size: 14,
-                                                          color: Colors
-                                                              .orange[700],
-                                                        ),
-                                                        const SizedBox(
-                                                          width: 6,
-                                                        ),
-                                                        Expanded(
-                                                          child: Column(
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .start,
-                                                            children: [
-                                                              Text(
-                                                                'Remarks',
-                                                                style: TextStyle(
-                                                                  fontSize: 9,
-                                                                  color: Colors
-                                                                      .orange[700],
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w600,
-                                                                ),
-                                                              ),
-                                                              const SizedBox(
-                                                                height: 2,
-                                                              ),
-                                                              Text(
-                                                                detail['result_remarks'],
-                                                                style: TextStyle(
-                                                                  fontSize: 11,
-                                                                  color: Colors
-                                                                      .grey[800],
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ],
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ] else if (detail['status'] ==
-                                      'completed') ...[
-                                    // Edge case: Test marked completed but no result (data inconsistency)
-                                    const SizedBox(height: 10),
-                                    Container(
-                                      padding: const EdgeInsets.all(10),
-                                      decoration: BoxDecoration(
-                                        color: Colors.red[50],
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: Colors.red.withValues(
-                                            alpha: 0.3,
-                                          ),
-                                        ),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            Icons.error_outline,
-                                            size: 16,
-                                            color: Colors.red[700],
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: Text(
-                                              'Data inconsistency: Test marked completed but result not uploaded. Please contact staff to upload result.',
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                color: Colors.red[700],
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ] else ...[
-                                    const SizedBox(height: 10),
-                                    Container(
-                                      padding: const EdgeInsets.all(10),
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey[100],
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: Colors.grey[300]!,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            Icons.hourglass_empty,
-                                            size: 16,
-                                            color: Colors.grey[600],
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: Text(
-                                              'Test result not available yet',
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                color: Colors.grey[600],
-                                                fontStyle: FontStyle.italic,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          );
-                        })
-                      else
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[100],
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.info_outline, color: Colors.grey[600]),
-                              const SizedBox(width: 8),
-                              Text(
-                                'No test details available',
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Footer
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.grey[50],
-                  border: Border(top: BorderSide(color: Colors.grey[200]!)),
-                  borderRadius: const BorderRadius.only(
-                    bottomLeft: Radius.circular(16),
-                    bottomRight: Radius.circular(16),
-                  ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton.icon(
-                      icon: const Icon(Icons.close),
-                      label: const Text('Close'),
-                      onPressed: () => Navigator.pop(context),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 12,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDialogSection(
-    String title,
-    IconData icon,
-    Color color,
-    List<Widget> children,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Icon(icon, size: 18, color: color),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              title,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: AppTheme.textDark,
-              ),
-            ),
-          ],
-        ),
-        if (children.isNotEmpty) ...[const SizedBox(height: 8), ...children],
-      ],
-    );
-  }
-
-  Widget _buildInfoTile(
-    IconData icon,
-    String label,
-    String value,
-    Color color,
-  ) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Icon(icon, size: 16, color: color),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textDark,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAuditLogsView() {
+  Widget _buildReportsView() {
     return Container(
       color: Colors.grey[50],
-      child: const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.history, size: 80, color: AppTheme.primaryBlue),
-              SizedBox(height: 24),
-              Text(
-                'Audit Logs',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textDark,
-                ),
+      child: _isReportsLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _reportsData == null
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.analytics_outlined,
+                    size: 80,
+                    color: Colors.grey[400],
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'No Reports Data Available',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Reports data will be displayed here once available',
+                    style: TextStyle(color: Colors.grey[600]),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: _loadReports,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Refresh'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryBlue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
               ),
-              SizedBox(height: 16),
-              Text(
-                'Track all staff activities and system changes',
-                style: TextStyle(fontSize: 16, color: AppTheme.textLight),
-                textAlign: TextAlign.center,
+            )
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Reports & Analytics',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey[300]!),
+                        ),
+                        child: DropdownButton<String>(
+                          value: _selectedReportPeriod,
+                          underline: const SizedBox(),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'daily',
+                              child: Text('Today'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'weekly',
+                              child: Text('This Week'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'monthly',
+                              child: Text('This Month'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'yearly',
+                              child: Text('This Year'),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() => _selectedReportPeriod = value);
+                              _loadReports();
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+
+                  // Financial Reports Section
+                  _buildFinancialReportsSection(),
+
+                  const SizedBox(height: 32),
+
+                  // Order Statistics Section
+                  _buildOrderStatisticsSection(),
+                ],
               ),
-              SizedBox(height: 32),
-              Text(
-                'Full audit logs feature will be displayed here',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppTheme.textLight,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+            ),
     );
   }
 
-  Widget _buildFinancialCard(
-    String title,
-    String value,
-    IconData icon,
-    Color color,
-    String subtitle,
-  ) {
+  Widget _buildFinancialReportsSection() {
+    final financialData = _reportsData?['financial'] ?? {};
+
     return Card(
       elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(icon, color: color, size: 24),
-                const SizedBox(width: 8),
+                Icon(Icons.attach_money, color: AppTheme.primaryBlue, size: 28),
+                const SizedBox(width: 12),
+                const Text(
+                  'Financial Reports',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+
+            // Revenue Cards
+            Row(
+              children: [
                 Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  child: _buildMetricCard(
+                    'Total Revenue',
+                    '\$${(financialData['totalRevenue'] ?? 0).toStringAsFixed(2)}',
+                    Icons.trending_up,
+                    Colors.green,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildMetricCard(
+                    'Monthly Revenue',
+                    '\$${(financialData['monthlyRevenue'] ?? 0).toStringAsFixed(2)}',
+                    Icons.calendar_today,
+                    Colors.blue,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Text(
-              value,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: color,
+            const SizedBox(height: 16),
+
+            Row(
+              children: [
+                Expanded(
+                  child: _buildMetricCard(
+                    'Total Expenses',
+                    '\$${(financialData['totalExpenses'] ?? 0).toStringAsFixed(2)}',
+                    Icons.money_off,
+                    Colors.red,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildMetricCard(
+                    'Net Profit',
+                    '\$${(financialData['netProfit'] ?? 0).toStringAsFixed(2)}',
+                    Icons.account_balance_wallet,
+                    (financialData['netProfit'] ?? 0) >= 0
+                        ? Colors.green
+                        : Colors.red,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // Net Profit Calculation Explanation
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blue[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        color: Colors.blue[700],
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Net Profit Calculation',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.blue[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Net Profit = Total Revenue - Total Expenses\n\nTotal Expenses include:\n• Staff Salaries\n• Inventory Costs\n• Subscription Fees',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.blue[800],
+                      height: 1.4,
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+            const SizedBox(height: 24),
+
+            // Financial Chart
+            const Text(
+              'Revenue vs Expenses',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 16),
+
+            Container(
+              height: 250,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey[200]!),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: BarChart(
+                  BarChartData(
+                    alignment: BarChartAlignment.spaceAround,
+                    maxY:
+                        [
+                          (financialData['totalRevenue'] ?? 0).toDouble(),
+                          (financialData['totalExpenses'] ?? 0).toDouble(),
+                          (financialData['netProfit'] ?? 0).abs().toDouble(),
+                        ].reduce((a, b) => a > b ? a : b) *
+                        1.2,
+                    barTouchData: BarTouchData(
+                      enabled: true,
+                      touchTooltipData: BarTouchTooltipData(
+                        tooltipBgColor: Colors.blueGrey,
+                        getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                          String label;
+                          switch (groupIndex) {
+                            case 0:
+                              label = 'Revenue';
+                              break;
+                            case 1:
+                              label = 'Expenses';
+                              break;
+                            case 2:
+                              label = 'Net Profit';
+                              break;
+                            default:
+                              label = '';
+                          }
+                          return BarTooltipItem(
+                            '$label\n\$${rod.toY.toStringAsFixed(2)}',
+                            const TextStyle(color: Colors.white),
+                          );
+                        },
+                      ),
+                    ),
+                    titlesData: FlTitlesData(
+                      show: true,
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, meta) {
+                            const titles = ['Revenue', 'Expenses', 'Profit'];
+                            if (value.toInt() >= 0 &&
+                                value.toInt() < titles.length) {
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  titles[value.toInt()],
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              );
+                            }
+                            return const Text('');
+                          },
+                        ),
+                      ),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 60,
+                          getTitlesWidget: (value, meta) {
+                            if (value == 0) return const Text('\$0');
+                            return Text(
+                              '\$${(value / 1000).toStringAsFixed(0)}k',
+                              style: const TextStyle(fontSize: 12),
+                            );
+                          },
+                        ),
+                      ),
+                      rightTitles: AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      topTitles: AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                    ),
+                    gridData: FlGridData(
+                      show: true,
+                      horizontalInterval:
+                          ([
+                                (financialData['totalRevenue'] ?? 0).toDouble(),
+                                (financialData['totalExpenses'] ?? 0)
+                                    .toDouble(),
+                                (financialData['netProfit'] ?? 0)
+                                    .abs()
+                                    .toDouble(),
+                              ].reduce((a, b) => a > b ? a : b) *
+                              1.2) /
+                          5,
+                      drawVerticalLine: false,
+                    ),
+                    borderData: FlBorderData(show: false),
+                    barGroups: [
+                      BarChartGroupData(
+                        x: 0,
+                        barRods: [
+                          BarChartRodData(
+                            toY: (financialData['totalRevenue'] ?? 0)
+                                .toDouble(),
+                            color: Colors.green,
+                            width: 30,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ],
+                      ),
+                      BarChartGroupData(
+                        x: 1,
+                        barRods: [
+                          BarChartRodData(
+                            toY: (financialData['totalExpenses'] ?? 0)
+                                .toDouble(),
+                            color: Colors.red,
+                            width: 30,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ],
+                      ),
+                      BarChartGroupData(
+                        x: 2,
+                        barRods: [
+                          BarChartRodData(
+                            toY: (financialData['netProfit'] ?? 0)
+                                .abs()
+                                .toDouble(),
+                            color: (financialData['netProfit'] ?? 0) >= 0
+                                ? Colors.green[700]
+                                : Colors.red[700],
+                            width: 30,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ],
         ),
@@ -5449,90 +5159,110 @@ class _OwnerDashboardScreenState extends State<OwnerDashboardScreen> {
     );
   }
 
-  Widget _buildExpenseRow(String label, double amount, {bool isTotal = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
-              fontSize: isTotal ? 18 : 16,
+  Widget _buildOrderStatisticsSection() {
+    final orderData = _reportsData?['orders'] ?? {};
+
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.assignment, color: AppTheme.primaryBlue, size: 28),
+                const SizedBox(width: 12),
+                const Text(
+                  'Order Statistics',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+              ],
             ),
+            const SizedBox(height: 24),
+
+            // Order Status Cards
+            Row(
+              children: [
+                Expanded(
+                  child: _buildMetricCard(
+                    'Total Orders',
+                    '${orderData['totalOrders'] ?? 0}',
+                    Icons.receipt_long,
+                    Colors.blue,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildMetricCard(
+                    'Completed Orders',
+                    '${orderData['completedOrders'] ?? 0}',
+                    Icons.check_circle,
+                    Colors.green,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildMetricCard(
+                    'Pending Orders',
+                    '${orderData['pendingOrders'] ?? 0}',
+                    Icons.pending,
+                    Colors.orange,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMetricCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color, size: 24),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[700],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 12),
           Text(
-            '\$${amount.toStringAsFixed(2)}',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
-              color: isTotal ? Colors.red : Colors.black,
-              fontSize: isTotal ? 18 : 16,
+            value,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: color,
             ),
           ),
         ],
       ),
     );
-  }
-
-  Widget _buildLegendItem(String label, Color color, double value) {
-    return Row(
-      children: [
-        Container(
-          width: 16,
-          height: 16,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-          ),
-        ),
-        Text(
-          '\$${value.toStringAsFixed(2)}',
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _loadReportsData() async {
-    if (!mounted) return;
-
-    setState(() => _isLoadingReports = true);
-
-    try {
-      final authProvider = Provider.of<OwnerAuthProvider>(
-        context,
-        listen: false,
-      );
-      ApiService.setAuthToken(authProvider.token);
-
-      final response = await OwnerApiService.getReports();
-
-      if (mounted) {
-        setState(() {
-          _reportsData = response;
-          _isLoadingReports = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _reportsData = null;
-          _isLoadingReports = false;
-        });
-      }
-      // Show error message
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to load reports: $e')));
-    }
   }
 
   Future<void> _showComponentsDialog(Map<String, dynamic> test) async {
@@ -6218,10 +5948,6 @@ class _InventoryManagementWidgetState
     final count = item['count'] ?? 0;
     final criticalLevel = item['critical_level'] ?? 0;
     final isLowStock = count <= criticalLevel;
-    final expirationDate = item['expiration_date'];
-    final isExpiringSoon =
-        expirationDate != null &&
-        DateTime.parse(expirationDate).difference(DateTime.now()).inDays <= 30;
 
     return AnimatedCard(
       onTap: () => _editInventoryItem(item),
@@ -6377,51 +6103,28 @@ class _InventoryManagementWidgetState
                 ],
               ],
             ),
-            if (isLowStock || isExpiringSoon) ...[
+            if (isLowStock) ...[
               const SizedBox(height: 6),
               Row(
                 children: [
-                  if (isLowStock) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text(
-                        'LOW STOCK',
-                        style: TextStyle(
-                          color: Colors.red,
-                          fontSize: 8,
-                          fontWeight: FontWeight.bold,
-                        ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'LOW STOCK',
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontSize: 8,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ],
-                  if (isExpiringSoon) ...[
-                    const SizedBox(width: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text(
-                        'EXPIRING SOON',
-                        style: TextStyle(
-                          color: Colors.orange,
-                          fontSize: 8,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ],
               ),
             ],

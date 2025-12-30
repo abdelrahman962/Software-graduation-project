@@ -64,12 +64,10 @@ class DoctorApiService {
   static Future<Map<String, dynamic>> requestTest({
     required String patientId,
     required List<String> tests,
-    bool isUrgent = false,
   }) async {
     return await ApiService.post('/doctor/request-test', {
       'patient_id': patientId,
       'tests': tests,
-      'is_urgent': isUrgent,
     });
   }
 

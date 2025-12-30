@@ -31,21 +31,10 @@ exports.validateRequestTest = [
   body('test_ids.*')
     .isMongoId().withMessage('Invalid test ID format'),
   
-  body('is_urgent')
-    .optional()
-    .isBoolean().withMessage('is_urgent must be true or false'),
-  
   body('remarks')
     .optional()
     .trim()
     .isLength({ max: 500 }).withMessage('Remarks must not exceed 500 characters')
-];
-
-// Mark Test Urgent Validation
-exports.validateMarkUrgent = [
-  param('orderId')
-    .trim()
-    .isMongoId().withMessage('Invalid order ID format')
 ];
 
 // Get Patient Test History Validation

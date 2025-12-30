@@ -24,6 +24,7 @@ const TestComponent = require('../models/TestComponent');
 const Order = require('../models/Order');
 const OrderDetails = require('../models/OrderDetails');
 const Result = require('../models/Result');
+const ResultComponent = require('../models/ResultComponent');
 const Invoice = require('../models/Invoices');
 const Notification = require('../models/Notification');
 const AuditLog = require('../models/AuditLog');
@@ -117,6 +118,7 @@ exports.login = async (req, res, next) => {
         _id: owner._id,
         owner_id: owner.owner_id,
         name: owner.name,
+        lab_name: owner.lab_name,
         email: owner.email,
         username: owner.username,
         subscription_end: owner.subscription_end,
@@ -538,7 +540,7 @@ exports.addStaff = async (req, res, next) => {
       );
 
       if (notificationSuccess) {
-        console.log(`Account activation notification sent to new staff ${newStaff.full_name.first} ${newStaff.full_name.last} via WhatsApp and Email`);
+        // console.log(`Account activation notification sent to new staff ${newStaff.full_name.first} ${newStaff.full_name.last} via WhatsApp and Email`);
       }
     } catch (notificationError) {
       console.error('Failed to send staff account activation notification:', notificationError);
@@ -770,7 +772,7 @@ exports.addDoctor = async (req, res, next) => {
       );
 
       if (notificationSuccess) {
-        console.log(`Account activation notification sent to new doctor ${newDoctor.name.first} ${newDoctor.name.last} via WhatsApp and Email`);
+        // console.log(`Account activation notification sent to new doctor ${newDoctor.name.first} ${newDoctor.name.last} via WhatsApp and Email`);
       }
     } catch (notificationError) {
       console.error('Failed to send doctor account activation notification:', notificationError);
@@ -1987,15 +1989,81 @@ exports.getOrderById = async (req, res, next) => {
     // Get order details (tests)
     const orderDetails = await OrderDetails.find({ order_id: order._id })
       .populate('test_id', 'test_name test_code price')
-      .populate('staff_id', 'full_name employee_number')
-      .populate('result_id');
+      .populate('staff_id', 'full_name employee_number');
+
+    // Get results for each order detail
+    const orderDetailsWithResults = await Promise.all(
+      orderDetails.map(async (detail) => {
+        const result = await Result.findOne({ detail_id: detail._id });
+        
+        // Check if test has components
+        const testComponents = await TestComponent.find({ 
+          test_id: detail.test_id._id,
+          is_active: true 
+        }).sort({ display_order: 1 });
+        
+        let components = [];
+        let hasComponentResults = false;
+        
+        if (testComponents.length > 0 && result) {
+          // Get component results
+          const componentResults = await ResultComponent.find({ result_id: result._id })
+            .populate('component_id', 'component_name component_code units reference_range');
+            
+          components = componentResults.map(compResult => ({
+            component_name: compResult.component_name,
+            component_code: compResult.component_id?.component_code || '',
+            component_value: compResult.component_value,
+            units: compResult.units || compResult.component_id?.units,
+            reference_range: compResult.reference_range || compResult.component_id?.reference_range,
+            is_abnormal: compResult.is_abnormal,
+            remarks: compResult.remarks
+          }));
+          
+          hasComponentResults = componentResults.length > 0;
+        }
+        
+        // Determine if test is completed based on results or component results
+        const isCompleted = result && (hasComponentResults || result.result_value);
+        
+        return {
+          _id: detail._id,
+          test_name: detail.test_id?.test_name || 'Unknown Test',
+          test_code: detail.test_id?.test_code || '',
+          price: detail.test_id?.price || 0,
+          status: isCompleted ? 'completed' : detail.status,
+          staff_name: detail.staff_id?.full_name || 'Unassigned',
+          staff_employee_number: detail.staff_id?.employee_number || '',
+          // Test-level result (for tests without components)
+          result_value: result?.result_value,
+          result_units: result?.units,
+          result_reference_range: result?.reference_range,
+          result_remarks: result?.remarks,
+          // Component results (for tests with components)
+          components: components,
+          has_components: testComponents.length > 0,
+          has_result: !!result,
+          has_component_results: hasComponentResults,
+          is_abnormal: result?.is_abnormal || components.some(c => c.is_abnormal),
+          created_at: detail.createdAt,
+          updated_at: detail.updatedAt
+        };
+      })
+    );
 
     // Get invoice if exists
     const invoice = await Invoice.findOne({ order_id: order._id });
 
     res.json({
-      order,
-      tests: orderDetails,
+      _id: order._id,
+      order_date: order.order_date,
+      status: order.status,
+      test_count: orderDetailsWithResults.length,
+      patient: order.patient_id ? {
+        name: order.patient_id.full_name,
+        patient_id: order.patient_id.patient_id
+      } : null,
+      order_details: orderDetailsWithResults,
       invoice
     });
   } catch (err) {
@@ -2286,7 +2354,7 @@ exports.contactAdmin = async (req, res, next) => {
         );
 
         if (whatsappSuccess) {
-          console.log(`WhatsApp notification sent to admin ${admin.full_name.first} for owner contact`);
+          // console.log(`WhatsApp notification sent to admin ${admin.full_name.first} for owner contact`);
         }
       } catch (whatsappErr) {
         console.error('Failed to send WhatsApp notification to admin:', whatsappErr);
@@ -3135,6 +3203,288 @@ exports.getAllInvoices = async (req, res, next) => {
       page: parseInt(page),
       totalPages: Math.ceil((patientName ? formattedInvoices.length : total) / parseInt(limit)),
       invoices: formattedInvoices
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get Invoice Details by Invoice ID
+ * @route   GET /api/owner/invoices/:invoiceId
+ * @access  Private (Owner)
+ */
+exports.getInvoiceDetails = async (req, res) => {
+  try {
+    const { invoiceId } = req.params;
+    const owner_id = req.user._id;
+
+    const invoice = await Invoice.findOne({
+      _id: invoiceId,
+      owner_id: owner_id
+    })
+      .populate({
+        path: 'order_id',
+        populate: [
+          { path: 'patient_id', select: 'full_name identity_number patient_id email phone_number birthday gender' },
+          { path: 'doctor_id', select: 'name' }
+        ]
+      })
+      .populate('owner_id', 'lab_name name address phone_number email')
+      .populate('items.test_id', 'test_name test_code');
+
+    if (!invoice) {
+      return res.status(404).json({ message: "Invoice not found or access denied" });
+    }
+
+    // Check if invoice has a valid order
+    if (!invoice.order_id) {
+      // If no order_id, try to provide invoice details using the invoice's items array
+      const subtotal = invoice.subtotal || invoice.items?.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0) || 0;
+      const tax = 0;
+      const discount = invoice.discount || 0;
+      const total = subtotal + tax - discount;
+
+      const labInfo = {
+        name: invoice.owner_id?.lab_name || invoice.owner_id?.name || 'Medical Laboratory',
+        address: invoice.owner_id?.address
+          ? `${invoice.owner_id.address.street || ''}, ${invoice.owner_id.address.city || ''}, ${invoice.owner_id.address.state || ''} ${invoice.owner_id.address.postal_code || ''}`.trim().replace(/^,\s*/, '').replace(/,\s*$/, '')
+          : null,
+        phone: invoice.owner_id?.phone_number,
+        email: invoice.owner_id?.email
+      };
+
+      return res.json({
+        success: true,
+        invoice: {
+          _id: invoice._id,
+          invoice_id: invoice.invoice_id,
+          invoice_date: invoice.invoice_date,
+          due_date: null,
+          payment_status: 'paid',
+          payment_date: invoice.payment_date,
+          payment_method: invoice.payment_method,
+          notes: invoice.remarks,
+          order_id: null,
+          order_date: null
+        },
+        lab: labInfo,
+        patient: { name: 'Unknown Patient', patient_id: 'N/A', email: null, phone: null, age: null, gender: null },
+        doctor: null,
+        tests: invoice.items?.map(item => ({
+          test_name: item.test_id?.test_name || item.test_name || 'Unknown Test',
+          test_code: item.test_id?.test_code || 'N/A',
+          price: item.price || 0,
+          status: 'completed'
+        })) || [],
+        totals: {
+          subtotal: subtotal,
+          tax: tax,
+          discount: discount,
+          total: total,
+          amount_paid: invoice.amount_paid || 0,
+          balance_due: total - (invoice.amount_paid || 0)
+        },
+        warning: 'This invoice has no associated order. Some information may be limited.'
+      });
+    }
+
+    // Get order details (tests)
+    const details = await OrderDetails.find({ order_id: invoice.order_id._id })
+      .populate('test_id', 'test_name test_code price');
+
+    // Calculate totals
+    const subtotal = invoice.subtotal || details.reduce((sum, d) => sum + (d.test_id?.price || 0), 0);
+    const tax = 0;
+    const discount = invoice.discount || 0;
+    const total = invoice.total_amount || (subtotal + tax - discount);
+
+    // Get patient info
+    const patientInfo = invoice.order_id.patient_id
+      ? {
+          name: `${invoice.order_id.patient_id.full_name?.first || ''} ${invoice.order_id.patient_id.full_name?.last || ''}`.trim(),
+          patient_id: invoice.order_id.patient_id.patient_id,
+          email: invoice.order_id.patient_id.email,
+          phone: invoice.order_id.patient_id.phone_number,
+          age: invoice.order_id.patient_id.birthday ? Math.floor((new Date() - new Date(invoice.order_id.patient_id.birthday)) / 31557600000) : null,
+          gender: invoice.order_id.patient_id.gender
+        }
+      : invoice.order_id.temp_patient_info || { name: 'Walk-in Patient', patient_id: 'N/A', email: null, phone: null, age: null, gender: null };
+
+    // Get lab info
+    const labInfo = {
+      name: invoice.owner_id?.lab_name || invoice.owner_id?.name || 'Medical Laboratory',
+      address: invoice.owner_id?.address
+        ? `${invoice.owner_id.address.street || ''}, ${invoice.owner_id.address.city || ''}, ${invoice.owner_id.address.state || ''} ${invoice.owner_id.address.postal_code || ''}`.trim().replace(/^,\s*/, '').replace(/,\s*$/, '')
+        : null,
+      phone: invoice.owner_id?.phone_number,
+      email: invoice.owner_id?.email
+    };
+
+    res.json({
+      success: true,
+      invoice: {
+        _id: invoice._id,
+        invoice_id: invoice.invoice_id,
+        invoice_date: invoice.invoice_date,
+        due_date: invoice.due_date,
+        payment_status: 'paid',
+        payment_date: invoice.payment_date,
+        payment_method: invoice.payment_method,
+        notes: invoice.notes,
+        order_id: invoice.order_id._id,
+        order_date: invoice.order_id.order_date
+      },
+      lab: labInfo,
+      patient: patientInfo,
+      doctor: invoice.order_id.doctor_id?.name
+        ? `Dr. ${invoice.order_id.doctor_id.name.first || ''} ${invoice.order_id.doctor_id.name.middle || ''} ${invoice.order_id.doctor_id.name.last || ''}`.trim()
+        : null,
+      tests: details.map(d => ({
+        test_name: d.test_id?.test_name || 'Unknown Test',
+        test_code: d.test_id?.test_code || 'N/A',
+        price: d.test_id?.price || 0,
+        status: d.status
+      })),
+      totals: {
+        subtotal: subtotal,
+        tax: tax,
+        discount: discount,
+        total: total,
+        amount_paid: invoice.amount_paid || 0,
+        balance_due: total - (invoice.amount_paid || 0)
+      }
+    });
+
+  } catch (err) {
+    console.error("Error fetching invoice details:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Get Invoice by Order ID
+ * @route   GET /api/owner/invoices/order/:orderId
+ * @access  Private (Owner)
+ */
+exports.getInvoiceByOrderId = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const owner_id = req.user._id;
+
+    const invoice = await Invoice.findOne({
+      order_id: orderId,
+      owner_id: owner_id
+    })
+      .populate({
+        path: 'order_id',
+        populate: [
+          { path: 'patient_id', select: 'full_name patient_id email phone_number birthday gender' },
+          { path: 'doctor_id', select: 'name' }
+        ]
+      })
+      .populate('owner_id', 'lab_name name address phone_number email');
+
+    if (!invoice) {
+      return res.status(404).json({ message: "Invoice not found for this order" });
+    }
+
+    res.json({
+      success: true,
+      invoice: {
+        _id: invoice._id,
+        invoice_id: invoice.invoice_id,
+        invoice_date: invoice.invoice_date,
+        due_date: invoice.due_date,
+        payment_status: 'paid',
+        payment_date: invoice.payment_date,
+        payment_method: invoice.payment_method,
+        notes: invoice.notes,
+        order_id: invoice.order_id._id,
+        order_date: invoice.order_id.order_date,
+        total_amount: invoice.total_amount
+      }
+    });
+
+  } catch (err) {
+    console.error("Error fetching invoice by order ID:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/**
+ * @desc    Get Audit Logs
+ * @route   GET /api/owner/audit-logs
+ * @access  Private (Owner)
+ */
+exports.getAuditLogs = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 50, startDate, endDate, action, staff_id } = req.query;
+
+    const query = { owner_id: req.user._id };
+
+    // Filter by date range
+    if (startDate || endDate) {
+      query.timestamp = {};
+      if (startDate) query.timestamp.$gte = new Date(startDate);
+      if (endDate) query.timestamp.$lte = new Date(endDate);
+    }
+
+    // Filter by action type
+    if (action) {
+      query.action = action;
+    }
+
+    // Filter by staff member
+    if (staff_id) {
+      query.staff_id = staff_id;
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [auditLogs, total] = await Promise.all([
+      AuditLog.find(query)
+        .populate('staff_id', 'full_name employee_number')
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      AuditLog.countDocuments(query)
+    ]);
+
+    res.json({
+      success: true,
+      auditLogs: auditLogs.map(log => ({
+        _id: log._id,
+        staff_name: log.staff_id ? `${log.staff_id.full_name.first} ${log.staff_id.full_name.last}` : log.username || 'System',
+        employee_number: log.staff_id?.employee_number || 'N/A',
+        action: log.action,
+        table_name: log.table_name,
+        message: log.message,
+        timestamp: log.timestamp
+      })),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * @desc    Get Audit Log Actions
+ * @route   GET /api/owner/audit-logs/actions
+ * @access  Private (Owner)
+ */
+exports.getAuditLogActions = async (req, res, next) => {
+  try {
+    const actions = await AuditLog.distinct('action', { owner_id: req.user._id });
+    res.json({
+      success: true,
+      actions: actions.sort()
     });
   } catch (err) {
     next(err);

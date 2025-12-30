@@ -23,10 +23,9 @@ class User {
   final String email;
   final String role;
   final FullName? fullName;
-  final String? phoneNumber; // Changed from phone to phoneNumber
+  final String? phoneNumber;
   final String? employeeNumber;
-  final String?
-  professionLicense; // Changed from licenseNumber to professionLicense
+  final String? professionLicense;
   final String? specialty;
   final String? identityNumber;
   final DateTime? birthday;
@@ -34,15 +33,19 @@ class User {
   final String? insuranceProvider;
   final String? insuranceNumber;
   final String? socialStatus;
+  final String? labName;
+  final String? username;
+  final String? qualification;
+  final DateTime? dateHired;
 
   User({
     required this.id,
     required this.email,
     required this.role,
     this.fullName,
-    this.phoneNumber, // Changed from phone
+    this.phoneNumber,
     this.employeeNumber,
-    this.professionLicense, // Changed from licenseNumber
+    this.professionLicense,
     this.specialty,
     this.identityNumber,
     this.birthday,
@@ -50,6 +53,10 @@ class User {
     this.insuranceProvider,
     this.insuranceNumber,
     this.socialStatus,
+    this.labName,
+    this.username,
+    this.qualification,
+    this.dateHired,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -71,6 +78,12 @@ class User {
       insuranceProvider: json['insurance_provider'],
       insuranceNumber: json['insurance_number'],
       socialStatus: json['social_status'],
+      labName: json['lab_name'] ?? json['owner_id']?['lab_name'],
+      username: json['username'],
+      qualification: json['qualification'],
+      dateHired: json['date_hired'] != null
+          ? _parseDate(json['date_hired'])
+          : null,
     );
   }
 
@@ -90,6 +103,10 @@ class User {
       if (insuranceProvider != null) 'insurance_provider': insuranceProvider,
       if (insuranceNumber != null) 'insurance_number': insuranceNumber,
       if (socialStatus != null) 'social_status': socialStatus,
+      if (labName != null) 'lab_name': labName,
+      if (username != null) 'username': username,
+      if (qualification != null) 'qualification': qualification,
+      if (dateHired != null) 'date_hired': dateHired!.toIso8601String(),
     };
   }
 

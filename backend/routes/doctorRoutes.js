@@ -130,13 +130,6 @@ router.get("/order/:orderId/results", doctorController.getOrderResults);
  */
 router.post("/request-test", ...doctorValidator.validateRequestTest, validateRequest, doctorController.requestTestForPatient);
 
-/**
- * @route   POST /api/doctor/order/:orderId/urgent
- * @desc    Mark existing order as urgent
- * @access  Private (Doctor)
- */
-router.post("/order/:orderId/urgent", ...doctorValidator.validateMarkUrgent, validateRequest, doctorController.markTestUrgent);
-
 // ==================== FEEDBACK ====================
 /**
  * @route   POST /api/doctor/feedback

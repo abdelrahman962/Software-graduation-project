@@ -136,15 +136,10 @@ const logAction = require("../utils/logAction");
  */
 exports.getLabTests = async (req, res) => {
   try {
-    console.log('getLabTests called');
-    console.log('req.user:', req.user);
-    
     const staff_id = req.user._id;
-    console.log('staff_id:', staff_id);
 
     // Get staff to find their lab (owner_id)
     const staff = await Staff.findById(staff_id);
-    console.log('staff found:', staff ? { id: staff._id, owner_id: staff.owner_id } : 'No staff');
     
     if (!staff) {
       return res.status(404).json({ message: "Staff not found" });
@@ -155,7 +150,7 @@ exports.getLabTests = async (req, res) => {
       .select('test_name test_code price category description units reference_range')
       .sort({ test_name: 1 });
     
-    console.log('tests found:', tests.length);
+    // console.log('tests found:', tests.length);
 
     res.json({
       success: true,
@@ -173,13 +168,10 @@ exports.getLabTests = async (req, res) => {
 exports.loginStaff = async (req, res) => {
   try {
     const { username, password } = req.body;
-    console.log('Login attempt:', { username, passwordProvided: !!password });
 
     const staff = await Staff.findOne({ $or: [{ username }, { email: username }] });
-    console.log('Staff found:', staff ? { id: staff._id, username: staff.username, email: staff.email, hasPassword: !!staff.password } : 'No staff found');
 
     if (!staff || !(await staff.comparePassword(password))) {
-      console.log('Login failed: invalid credentials');
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
@@ -210,14 +202,6 @@ exports.uploadResult = async (req, res) => {
     const staff_id = req.user._id; // Use authenticated staff ID
     const { detail_id, result_value, remarks, components } = req.body;
 
-    console.log('🔍 DEBUG: uploadResult called with:', {
-      staff_id,
-      detail_id,
-      result_value: result_value ? 'provided' : 'null',
-      remarks: remarks ? 'provided' : 'null',
-      components: components ? 'provided' : 'null'
-    });
-
     // Validate required fields
     if (!detail_id) {
       return res.status(400).json({ message: "detail_id is required" });
@@ -235,15 +219,8 @@ exports.uploadResult = async (req, res) => {
 
     // Check if the test is assigned to this staff
     if (!detail.staff_id || detail.staff_id.toString() !== staff_id.toString()) {
-      console.log('🔍 DEBUG: Authorization failed:', {
-        detail_staff_id: detail.staff_id,
-        current_staff_id: staff_id,
-        detail_status: detail.status
-      });
       return res.status(403).json({ message: "You are not authorized to upload results for this test" });
     }
-
-    console.log('🔍 DEBUG: Authorization passed for staff:', staff_id);
 
     const test = detail.test_id;
     const order = detail.order_id;
@@ -276,8 +253,7 @@ exports.uploadResult = async (req, res) => {
       }
     }
 
-    // 3️⃣ Initialize urgency and abnormality flags
-    let isUrgent = false;
+    // 3️⃣ Initialize abnormality flags
     let isAbnormal = false;
     let abnormalComponentsCount = 0;
 
@@ -316,7 +292,6 @@ exports.uploadResult = async (req, res) => {
               isComponentAbnormal = true;
               isAbnormal = true;
               abnormalComponentsCount++;
-              isUrgent = true; // Any abnormal component makes the entire result urgent
             }
           }
         }
@@ -348,7 +323,6 @@ exports.uploadResult = async (req, res) => {
           if (!isNaN(resultNum) && (resultNum < min || resultNum > max)) {
             isAbnormal = true;
             abnormalComponentsCount = 1; // Single abnormal value
-            isUrgent = true;
           }
         }
       }
@@ -367,86 +341,32 @@ exports.uploadResult = async (req, res) => {
     // 7️⃣ Send notifications
     const notifications = [];
 
-    if (isUrgent) {
-      // Mark order as urgent with detailed abnormality info
-      order.remarks = `URGENT: Abnormal test results - ${abnormalComponentsCount} abnormal value(s) detected`;
-      await order.save();
+    // 🔔 To the Patient (result available)
+    if (order.patient_id) {
+      notifications.push({
+        sender_id: staff_id,
+        sender_model: "Staff",
+        receiver_id: order.patient_id._id,
+        receiver_model: "Patient",
+        type: "test_result",
+        title: "✅ Test Result Available",
+        message: `Your test result for ${test.test_name} is now available. You can view it in your dashboard.`,
+        related_id: result._id
+      });
+    }
 
-      // 🔔 To the Doctor (if exists) - HIGH PRIORITY
-      if (order.doctor_id) {
-        notifications.push({
-          sender_id: staff_id,
-          sender_model: "Staff",
-          receiver_id: order.doctor_id._id,
-          receiver_model: "Doctor",
-          type: "test_result",
-          title: "🚨 URGENT: Abnormal Test Results",
-          message: `URGENT: ${test.test_name} results for patient ${order.patient_id?.full_name?.first || ''} ${order.patient_id?.full_name?.last || ''} show ${abnormalComponentsCount} abnormal value(s). Immediate attention required.`,
-          related_id: result._id,
-          priority: "high"
-        });
-      }
-
-      // 🔔 To the Patient (urgent) - with clear warning
-      if (order.patient_id) {
-        notifications.push({
-          sender_id: staff_id,
-          sender_model: "Staff",
-          receiver_id: order.patient_id._id,
-          receiver_model: "Patient",
-          type: "test_result",
-          title: "⚠️ CRITICAL: Abnormal Test Results",
-          message: `URGENT: Your ${test.test_name} results are outside normal ranges. Please contact your doctor immediately for interpretation and next steps.`,
-          related_id: result._id,
-          priority: "high"
-        });
-      }
-
-      // 🔔 To Lab Staff - for awareness of critical cases
-      const labStaff = await Staff.find({ lab_id: order.owner_id._id });
-      for (const staff of labStaff) {
-        if (staff._id.toString() !== staff_id.toString()) { // Don't notify the uploader
-          notifications.push({
-            sender_id: staff_id,
-            sender_model: "Staff",
-            receiver_id: staff._id,
-            receiver_model: "Staff",
-            type: "test_result",
-            title: "🚨 Abnormal Results Alert",
-            message: `Abnormal ${test.test_name} results uploaded for patient ${order.patient_id?.full_name?.first || ''} ${order.patient_id?.full_name?.last || ''}. ${abnormalComponentsCount} abnormal value(s) detected.`,
-            related_id: result._id,
-            priority: "medium"
-          });
-        }
-      }
-    } else {
-      // 🔔 To the Patient (normal result)
-      if (order.patient_id) {
-        notifications.push({
-          sender_id: staff_id,
-          sender_model: "Staff",
-          receiver_id: order.patient_id._id,
-          receiver_model: "Patient",
-          type: "test_result",
-          title: "✅ Test Result Available",
-          message: `Your test result for ${test.test_name} is now available. You can view it in your dashboard.`,
-          related_id: result._id
-        });
-      }
-
-      // 🔔 To the Doctor (normal result)
-      if (order.doctor_id) {
-        notifications.push({
-          sender_id: staff_id,
-          sender_model: "Staff",
-          receiver_id: order.doctor_id._id,
-          receiver_model: "Doctor",
-          type: "test_result",
-          title: "✅ Test Result Available",
-          message: `Test ${test.test_name} result for patient ${order.patient_id?.full_name?.first || ''} ${order.patient_id?.full_name?.last || ''} is now available.`,
-          related_id: result._id
-        });
-      }
+    // 🔔 To the Doctor (normal result)
+    if (order.doctor_id) {
+      notifications.push({
+        sender_id: staff_id,
+        sender_model: "Staff",
+        receiver_id: order.doctor_id._id,
+        receiver_model: "Doctor",
+        type: "test_result",
+        title: "✅ Test Result Available",
+        message: `Test ${test.test_name} result for patient ${order.patient_id?.full_name?.first || ''} ${order.patient_id?.full_name?.last || ''} is now available.`,
+        related_id: result._id
+      });
     }
 
     // ✅ Save notifications
@@ -482,7 +402,6 @@ exports.uploadResult = async (req, res) => {
           order.patient_id,
           test,
           resultUrl,
-          isUrgent,
           order.owner_id?.lab_name || 'Medical Lab',
           detail._id,
           isAbnormal,
@@ -493,7 +412,7 @@ exports.uploadResult = async (req, res) => {
         );
 
         if (notificationSuccess) {
-          console.log(`Lab report notification sent to patient ${patientName} for test ${test.test_name} via WhatsApp and Email${isAbnormal ? ' (ABNORMAL RESULTS)' : ''}`);
+          // console.log(`Lab report notification sent to patient ${patientName} for test ${test.test_name} via WhatsApp and Email${isAbnormal ? ' (ABNORMAL RESULTS)' : ''}`);
         }
       } catch (whatsappError) {
         console.error('Failed to send notification:', whatsappError);
@@ -511,7 +430,7 @@ exports.uploadResult = async (req, res) => {
       if (totalTests > 0 && completedTests === totalTests && order.status !== 'completed') {
         order.status = 'completed';
         await order.save();
-        console.log(`Order ${order._id} marked as completed - all ${totalTests} tests are done`);
+        // console.log(`Order ${order._id} marked as completed - all ${totalTests} tests are done`);
       }
     } catch (orderCheckError) {
       console.error('Error checking order completion:', orderCheckError);
@@ -519,9 +438,9 @@ exports.uploadResult = async (req, res) => {
     }
 
     res.status(201).json({
+      success: true,
       message: "Result uploaded successfully",
       result,
-      urgent: isUrgent,
       has_components: hasComponents
     });
   } catch (error) {
@@ -529,6 +448,285 @@ exports.uploadResult = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+/**
+ * @desc    Run Test with HL7 Simulation
+ * @route   POST /api/staff/run-test
+ * @access  Private (Staff)
+ */
+exports.runTest = async (req, res) => {
+  try {
+    // console.log('🎯 BACKEND SIMULATION START: runTest endpoint called');
+    // console.log('📨 BACKEND: Request body:', req.body);
+
+    // For testing without auth, use detail.staff_id
+    const staff_id = req.user ? req.user._id : null;
+    const { detail_id, priority = 'normal' } = req.body;
+
+    // console.log('👤 BACKEND: Staff ID:', staff_id);
+    // console.log('🆔 BACKEND: Detail ID:', detail_id);
+    // console.log('🔥 BACKEND: Priority:', priority);
+
+    // Validate required fields
+    if (!detail_id) {
+      // console.log('❌ BACKEND: Validation failed - detail_id is required');
+      return res.status(400).json({ message: "detail_id is required" });
+    }
+
+    // console.log('✅ BACKEND SIMULATION STEP 1: Validation passed, loading order detail');
+
+    // 1️⃣ Load order detail with related test + order + patient
+    const detail = await OrderDetails.findById(detail_id)
+      .populate("test_id")
+      .populate({
+        path: "order_id",
+        populate: [{ path: "patient_id" }]
+      });
+
+    if (!detail) {
+      // console.log('❌ BACKEND: Order detail not found for ID:', detail_id);
+      return res.status(404).json({ message: "Order detail not found" });
+    }
+
+    // console.log('📋 BACKEND: Order detail loaded successfully');
+    // console.log('🧪 BACKEND: Test ID:', detail.test_id?._id);
+    // console.log('📦 BACKEND: Order ID:', detail.order_id?._id);
+
+    // Check if the test is assigned to this staff (skip if no auth)
+    if (req.user && (!detail.staff_id || detail.staff_id.toString() !== staff_id.toString())) {
+      // console.log('❌ BACKEND: Authorization failed - test not assigned to staff');
+      return res.status(403).json({ message: "You are not authorized to run tests for this test" });
+    }
+
+    // Check if sample is collected
+    if (!detail.sample_collected) {
+      // console.log('❌ BACKEND: Sample not collected for test');
+      return res.status(400).json({ message: "⚠️ Sample must be collected before running the test" });
+    }
+
+    // Check if result already exists
+    const existingResult = await Result.findOne({ detail_id });
+    if (existingResult) {
+      console.log('❌ BACKEND: Result already exists for this test');
+      return res.status(400).json({ message: "⚠️ Result already exists for this test" });
+    }
+
+    const test = detail.test_id;
+
+    if (!test || !test._id) {
+      console.log('❌ BACKEND: Test information not found');
+      return res.status(400).json({ message: "⚠️ Test information not found for this order detail" });
+    }
+    
+    const order = detail.order_id;
+    
+    if (!order || !order._id) {
+      console.log('❌ BACKEND: Order not found');
+      return res.status(400).json({ message: "⚠️ Order not found for this test detail" });
+    }
+    
+    const patient = order.patient_id;
+    
+    if (!patient || !patient._id) {
+      console.log('❌ BACKEND: Patient information not found');
+      return res.status(400).json({ message: "⚠️ Patient information not found for this order" });
+    }
+    
+    console.log('✅ BACKEND SIMULATION STEP 2: All data loaded successfully');
+    console.log('👤 BACKEND: Patient:', patient.full_name?.first, patient.full_name?.last);
+    console.log('🧪 BACKEND: Test:', test.test_name, '(' + test.test_code + ')');
+    console.log('📋 BACKEND: Order:', order._id);
+
+    // Update status to in_progress
+    detail.status = 'in_progress';
+    await detail.save();
+    console.log('📝 BACKEND: Order detail status updated to in_progress');
+
+    console.log('🎲 BACKEND SIMULATION STEP 3: Generating random results');
+
+    // 2️⃣ Generate random results (instead of HL7)
+    let randomResult = {};
+    let isAbnormal = false;
+
+    // Get test components if they exist
+    const testComponents = await TestComponent.find({ test_id: test._id, is_active: true }).sort({ display_order: 1 });
+
+    console.log('🧬 BACKEND: Test components found:', testComponents.length);
+
+    if (testComponents.length > 0) {
+      console.log('🔬 BACKEND: Processing multi-component test');
+      // Multi-component test
+      const components = [];
+      for (const component of testComponents) {
+        console.log('🧫 BACKEND: Generating result for component:', component.component_name);
+        const componentResult = generateRandomResult(component);
+        console.log('🧫 BACKEND: Generated value:', componentResult.value, 'Abnormal:', componentResult.isAbnormal);
+
+        components.push({
+          component_id: component._id,
+          component_name: component.component_name,
+          component_value: componentResult.value,
+          units: component.units,
+          reference_range: component.reference_range,
+          is_abnormal: componentResult.isAbnormal,
+          remarks: '', // Can be left empty or generated
+        });
+        if (componentResult.isAbnormal) isAbnormal = true;
+      }
+      randomResult = {
+        has_components: true,
+        components: components,
+        is_abnormal: isAbnormal,
+        abnormal_components_count: components.filter(c => c.is_abnormal).length,
+        remarks: 'Generated via HL7 simulation',
+      };
+      console.log('✅ BACKEND: Multi-component result generated with', components.length, 'components');
+    } else {
+      console.log('🔬 BACKEND: Processing single-value test');
+      // Single-value test
+      const resultValue = generateRandomResult({
+        reference_range: test.reference_range,
+        component_name: test.test_name,
+        component_code: test.test_code,
+        units: test.units
+      }).value;
+
+      console.log('🧫 BACKEND: Generated single value:', resultValue);
+
+      // Check if abnormal for single value
+      let singleIsAbnormal = false;
+      if (test.reference_range && test.reference_range.match(/(\d+\.?\d*)\s*-\s*(\d+\.?\d*)/)) {
+        const rangeMatch = test.reference_range.match(/(\d+\.?\d*)\s*-\s*(\d+\.?\d*)/);
+        const min = parseFloat(rangeMatch[1]);
+        const max = parseFloat(rangeMatch[2]);
+        const value = parseFloat(resultValue);
+        if (value < min || value > max) {
+          singleIsAbnormal = true;
+        }
+        console.log('📏 BACKEND: Reference range:', min, '-', max, 'Value abnormal:', singleIsAbnormal);
+      }
+      randomResult = {
+        has_components: false,
+        result_value: resultValue,
+        units: test.units,
+        reference_range: test.reference_range,
+        is_abnormal: singleIsAbnormal,
+        remarks: 'Generated via HL7 simulation',
+      };
+      isAbnormal = singleIsAbnormal;
+      console.log('✅ BACKEND: Single-value result generated');
+    }
+
+    console.log('🎯 BACKEND SIMULATION STEP 4: Preparing response');
+    const responseData = {
+      message: "🏥 Test simulation completed successfully. Review and save the results.",
+      detail_id: detail._id,
+      test_name: test.test_name,
+      status: 'in_progress',
+      simulated_result: true,
+      is_abnormal: isAbnormal,
+      random_result: randomResult, // New: Return generated results for frontend display
+    };
+
+    console.log('📤 BACKEND: Response data keys:', Object.keys(responseData));
+    console.log('📤 BACKEND: random_result present:', responseData.random_result != null);
+    console.log('📤 BACKEND: has_components:', responseData.random_result?.has_components);
+    console.log('📤 BACKEND: is_abnormal:', responseData.random_result?.is_abnormal);
+
+    console.log('🎉 BACKEND SIMULATION SUCCESS: HL7 simulation completed successfully!');
+    res.json({
+      success: true,
+      ...responseData
+    });
+
+  } catch (error) {
+    console.error("💥 BACKEND SIMULATION ERROR:", error);
+    console.error("📊 BACKEND: Error stack:", error.stack);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Helper function to generate random test results
+function generateRandomResult(component) {
+  console.log('🎲 BACKEND GENERATE: Starting random result generation for:', component.component_name || component.test_name);
+
+  let value = '';
+  let isAbnormal = false;
+
+  // Parse reference range if available
+  if (component.reference_range) {
+    console.log('📏 BACKEND GENERATE: Reference range found:', component.reference_range);
+    const rangeMatch = component.reference_range.match(/(\d+\.?\d*)\s*-\s*(\d+\.?\d*)/);
+    if (rangeMatch) {
+      const min = parseFloat(rangeMatch[1]);
+      const max = parseFloat(rangeMatch[2]);
+      console.log('📏 BACKEND GENERATE: Parsed range - Min:', min, 'Max:', max);
+
+      // 80% chance of normal result, 20% chance of abnormal
+      if (Math.random() < 0.8) {
+        // Normal range
+        value = (Math.random() * (max - min) + min).toFixed(2);
+        console.log('✅ BACKEND GENERATE: Generated normal value:', value);
+      } else {
+        // Abnormal - either high or low
+        if (Math.random() < 0.5) {
+          // High
+          value = (max + Math.random() * max * 0.5).toFixed(2);
+          console.log('⚠️ BACKEND GENERATE: Generated high abnormal value:', value);
+        } else {
+          // Low
+          value = (min - Math.random() * min * 0.5).toFixed(2);
+          console.log('⚠️ BACKEND GENERATE: Generated low abnormal value:', value);
+        }
+        isAbnormal = true;
+      }
+    } else {
+      // Check if reference range contains qualitative values (like "Yellow", "Clear", "Negative")
+      const qualitativeValues = component.reference_range.trim();
+      console.log('🎨 BACKEND GENERATE: Qualitative reference range detected:', qualitativeValues);
+
+      // For urine analysis qualitative components
+      if (qualitativeValues === 'Yellow' || qualitativeValues === 'Clear' || qualitativeValues === 'Negative') {
+        // 90% chance of normal qualitative result
+        if (Math.random() < 0.9) {
+          value = qualitativeValues;
+          console.log('✅ BACKEND GENERATE: Generated normal qualitative value:', value);
+        } else {
+          // Generate abnormal qualitative values
+          if (qualitativeValues === 'Yellow') {
+            value = Math.random() < 0.5 ? 'Pale Yellow' : 'Dark Yellow';
+          } else if (qualitativeValues === 'Clear') {
+            value = Math.random() < 0.5 ? 'Cloudy' : 'Turbid';
+          } else if (qualitativeValues === 'Negative') {
+            value = Math.random() < 0.5 ? 'Trace' : 'Positive';
+          }
+          isAbnormal = true;
+          console.log('⚠️ BACKEND GENERATE: Generated abnormal qualitative value:', value);
+        }
+      } else {
+        // No valid numeric range and not recognized qualitative, generate random numeric value
+        value = (Math.random() * 100 + 1).toFixed(2);
+        console.log('🔄 BACKEND GENERATE: Generated fallback numeric value:', value);
+      }
+    }
+  } else {
+    // No reference range, generate random value based on test type
+    const testName = component.component_name?.toLowerCase() || '';
+    console.log('📊 BACKEND GENERATE: No reference range, using test type logic for:', testName);
+
+    if (testName.includes('count') || testName.includes('percentage')) {
+      value = (Math.random() * 100).toFixed(1);
+    } else if (testName.includes('ratio') || testName.includes('index')) {
+      value = (Math.random() * 10).toFixed(2);
+    } else {
+      value = (Math.random() * 200 + 1).toFixed(2);
+    }
+    console.log('🔄 BACKEND GENERATE: Generated type-based value:', value);
+  }
+
+  console.log('🎯 BACKEND GENERATE: Result generation complete - Value:', value, 'Abnormal:', isAbnormal);
+  return { value, isAbnormal };
+}
 
 
 
@@ -810,6 +1008,23 @@ exports.collectSample = async (req, res) => {
     }
 
     if (detail.sample_collected) {
+      // If sample is collected but status is not updated, fix the status
+      if (!['collected', 'in_progress', 'completed'].includes(detail.status)) {
+        detail.status = 'collected';
+        detail.sample_collected_date = detail.sample_collected_date || new Date();
+        await detail.save();
+        
+        // Log the fix
+        const loggingStaff = await Staff.findById(staff_id).select('username');
+        await logAction(
+          staff_id, 
+          loggingStaff.username,
+          `Fixed inconsistent status for collected sample: ${detail.test_id.test_name}`,
+          'OrderDetails',
+          detail_id
+        );
+      }
+      
       return res.status(400).json({ 
         message: "⚠️ Sample already collected for this test" 
       });
@@ -923,7 +1138,7 @@ exports.updateSampleStatus = async (req, res) => {
   try {
     const { detail_id, status } = req.body;
 
-    const validStatuses = ["pending", "urgent", "collected", "in_progress", "completed"];
+    const validStatuses = ["pending", "collected", "in_progress", "completed"];
     if (!validStatuses.includes(status.toLowerCase())) {
       return res.status(400).json({ 
         message: `⚠️ Invalid status. Must be one of: ${validStatuses.join(', ')}` 
@@ -1194,7 +1409,7 @@ exports.getStaffDashboard = async (req, res) => {
   try {
     const staff_id = req.user._id; // from authMiddleware
 
-    // 1️⃣ Assigned tests (all statuses) - Prioritize urgent tests
+    // 1️⃣ Assigned tests (all statuses)
     const assignedTests = await OrderDetails.find({ staff_id })
       .populate('test_id', 'test_name test_code sample_type')
       .populate({
@@ -1206,8 +1421,7 @@ exports.getStaffDashboard = async (req, res) => {
         }
       })
       .sort({ 
-        status: 1,        // "urgent" comes before "pending" alphabetically
-        createdAt: -1    // Then by newest first
+        createdAt: -1    // Newest first
       })
       .limit(20);
 
@@ -1358,7 +1572,6 @@ exports.getAllLabOrders = async (req, res) => {
           status: order.status,
           doctor_name: doctorName,
           remarks: order.remarks,
-          is_urgent: order.remarks === 'urgent',
           tests: details.map(d => ({
             detail_id: d._id,
             test_id: d.test_id?._id,
@@ -1373,8 +1586,7 @@ exports.getAllLabOrders = async (req, res) => {
               name: `${d.staff_id.full_name.first} ${d.staff_id.full_name.last}`,
               employee_number: d.staff_id.employee_number,
               username: d.staff_id.username
-            } : null,
-            is_urgent: d.status === 'urgent'
+            } : null
           })),
           total_cost: totalCost,
           test_count: details.length,
@@ -1450,10 +1662,32 @@ exports.createWalkInOrder = async (req, res) => {
       tempPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8).toUpperCase();
 
       // Generate unique patient ID
-      const lastPatient = await Patient.findOne().sort({ patient_id: -1 });
-      const newPatientId = lastPatient && lastPatient.patient_id 
-        ? (parseInt(lastPatient.patient_id) + 1).toString()
-        : '1000';
+      let newPatientId = '1000';
+
+      try {
+        // Find the highest numeric patient_id
+        const lastPatient = await Patient.findOne({
+          patient_id: { $exists: true, $ne: null, $ne: 'NaN', $regex: /^\d+$/ }
+        }).sort({ patient_id: -1 });
+
+        if (lastPatient && lastPatient.patient_id) {
+          const lastId = parseInt(lastPatient.patient_id);
+          if (!isNaN(lastId)) {
+            newPatientId = (lastId + 1).toString();
+          }
+        }
+      } catch (error) {
+        console.warn('Error generating patient ID, using timestamp fallback:', error.message);
+        // If there's any issue, generate a timestamp-based ID to ensure uniqueness
+        newPatientId = Date.now().toString();
+      }
+
+      // Ensure patient_id is always a valid string
+      if (!newPatientId || newPatientId === 'NaN') {
+        newPatientId = Date.now().toString();
+      }
+
+      console.log(`Generated new patient ID: ${newPatientId}`);
 
       // Create patient account (password will be hashed by model's pre-save hook)
       patient = await Patient.create({
@@ -1639,15 +1873,13 @@ exports.getPendingOrders = async (req, res) => {
     }
 
     // Get all pending orders for this lab where patient not yet registered
-    // Sort by urgency first, then by date (urgent tests appear at the top)
     const pendingOrders = await Order.find({
       owner_id: staff.owner_id,
       status: 'pending',
       is_patient_registered: false
     })
     .sort({ 
-      remarks: -1,      // "urgent" > null/empty (descending = urgent first)
-      order_date: 1     // Then by date (oldest first)
+      order_date: 1     // By date (oldest first)
     });
 
     // Get order details for each order
@@ -1665,13 +1897,11 @@ exports.getPendingOrders = async (req, res) => {
           patient_info: order.temp_patient_info,
           order_date: order.order_date,
           remarks: order.remarks,
-          is_urgent: order.remarks === 'urgent',
           tests: details.map(d => ({
             test_name: d.test_id.test_name,
             test_code: d.test_id.test_code,
             price: d.test_id.price,
-            status: d.status,
-            is_urgent: d.status === 'urgent'
+            status: d.status
           })),
           total_cost: totalCost,
           test_count: details.length
@@ -1907,7 +2137,6 @@ exports.getUnassignedTests = async (req, res) => {
     const owner_id = req.user.ownerId; // Assuming owner is logged in
 
     // Find all order details where staff_id is null and order belongs to this lab
-    // Sort by urgency first (urgent tests at the top)
     const unassignedTests = await OrderDetails.find({ 
       staff_id: null 
     })
@@ -1918,8 +2147,7 @@ exports.getUnassignedTests = async (req, res) => {
     })
     .populate('test_id', 'test_name test_code method sample_type')
     .sort({ 
-      status: 1,        // "urgent" before "pending" alphabetically
-      createdAt: -1    // Then by newest first
+      createdAt: -1    // By newest first
     })
     .lean();
 
@@ -1966,7 +2194,6 @@ exports.getMyUnassignedTests = async (req, res) => {
     }
 
     // Find all order details where staff_id is null and order belongs to this lab
-    // Sort by urgency first (urgent tests at the top)
     const unassignedTests = await OrderDetails.find({
       staff_id: null
     })
@@ -1977,8 +2204,7 @@ exports.getMyUnassignedTests = async (req, res) => {
     })
     .populate('test_id', 'test_name test_code method sample_type tube_type price')
     .sort({
-      status: 1,        // "urgent" before "pending" alphabetically
-      createdAt: -1    // Then by newest first
+      createdAt: -1    // By newest first
     })
     .lean();
 
@@ -2277,11 +2503,22 @@ exports.getMyAssignedTests = async (req, res) => {
     const staff_id = req.user._id;
     const { status_filter, device_id } = req.query;
 
+    console.log('🔍 BACKEND getMyAssignedTests: Called for staff:', staff_id.toString());
+    console.log('🔍 BACKEND getMyAssignedTests: status_filter:', status_filter, 'device_id:', device_id);
+
     // Build query
     let query = { staff_id };
     if (status_filter) {
-      query.status = status_filter;
+      if (status_filter === 'assigned') {
+        // Include both 'assigned' and 'pending' statuses for assigned filter
+        query.status = { $in: ['assigned', 'pending'] };
+      } else {
+        query.status = status_filter;
+      }
     }
+
+    console.log('🔍 BACKEND getMyAssignedTests: Final query:', JSON.stringify(query, null, 2));
+
     if (device_id) {
       query.device_id = device_id;
     }
@@ -2312,6 +2549,11 @@ exports.getMyAssignedTests = async (req, res) => {
       })
       .lean();
 
+    console.log('🔍 BACKEND getMyAssignedTests: Raw query results count:', assignedTests.length);
+    if (assignedTests.length > 0) {
+      console.log('🔍 BACKEND getMyAssignedTests: First test sample:', JSON.stringify(assignedTests[0], null, 2));
+    }
+
     // Get results for completed tests
     const completedDetailIds = assignedTests
       .filter(d => d.status === 'completed')
@@ -2328,7 +2570,6 @@ exports.getMyAssignedTests = async (req, res) => {
 
     // Group tests by status
     const statusGroups = {
-      urgent: [],
       assigned: [],
       collected: [],
       in_progress: [],
@@ -2339,8 +2580,6 @@ exports.getMyAssignedTests = async (req, res) => {
     const devices = new Set();
 
     assignedTests.forEach(detail => {
-      const isUrgent = detail.status === 'urgent' || detail.order_id?.remarks === 'urgent';
-      
       // Get result data for completed tests
       let resultData = null;
       if (detail.status === 'completed') {
@@ -2389,7 +2628,6 @@ exports.getMyAssignedTests = async (req, res) => {
         } : null,
         order_date: detail.order_id?.order_date,
         status: detail.status,
-        is_urgent: isUrgent,
         sample_collected: detail.sample_collected,
         sample_collected_date: detail.sample_collected_date,
         assigned_at: detail.assigned_at,
@@ -2403,25 +2641,27 @@ exports.getMyAssignedTests = async (req, res) => {
       }
 
       // Group by status
-      if (isUrgent && detail.status !== 'completed') {
-        statusGroups.urgent.push(testData);
-      } else {
-        // Treat 'pending' as 'assigned' for display purposes
-        const displayStatus = detail.status === 'pending' ? 'assigned' : detail.status;
-        statusGroups[displayStatus]?.push(testData);
-      }
+      // Treat 'pending' as 'assigned' for display purposes
+      const displayStatus = detail.status === 'pending' ? 'assigned' : detail.status;
+      statusGroups[displayStatus]?.push(testData);
     });
 
     // Calculate statistics
     const stats = {
       total: assignedTests.length,
-      urgent: statusGroups.urgent.length,
       assigned: statusGroups.assigned.length,
       collected: statusGroups.collected.length,
       in_progress: statusGroups.in_progress.length,
       completed: statusGroups.completed.length,
-      pending_work: statusGroups.assigned.length + statusGroups.collected.length + statusGroups.in_progress.length + statusGroups.urgent.length
+      pending_work: statusGroups.assigned.length + statusGroups.collected.length + statusGroups.in_progress.length
     };
+
+    console.log('🔍 BACKEND getMyAssignedTests: Status groups counts:', {
+      assigned: statusGroups.assigned.length,
+      collected: statusGroups.collected.length,
+      in_progress: statusGroups.in_progress.length,
+      completed: statusGroups.completed.length
+    });
 
     res.json({
       success: true,
@@ -2443,7 +2683,6 @@ exports.getMyAssignedTests = async (req, res) => {
           patient_id: detail.order_id.patient_id.patient_id
         } : null,
         status: detail.status,
-        is_urgent: detail.status === 'urgent' || detail.order_id?.remarks === 'urgent',
         sample_collected: detail.sample_collected,
         assigned_at: detail.assigned_at
       }))
@@ -3108,11 +3347,17 @@ exports.getTestsForResultUpload = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Get order details that are collected but don't have results yet
+    // Get ALL order details assigned to this staff (not just collected ones)
+    // First, get OrderDetails that don't have results yet
+    const existingResultDetailIds = await Result.distinct('detail_id', {
+      detail_id: { $exists: true }
+    });
+
     const orderDetails = await OrderDetails.find({
       staff_id: staff_id,
-      status: 'collected', // Sample collected
-      result_id: { $exists: false } // No result uploaded yet
+      status: { $in: ['collected', 'in_progress'] }, // Only tests that need result upload
+      sample_collected: true, // Ensure sample has been collected
+      _id: { $nin: existingResultDetailIds } // Exclude tests that already have results
     })
     .populate({
       path: 'order_id',
@@ -3146,11 +3391,12 @@ exports.getTestsForResultUpload = async (req, res) => {
       });
     }
 
-    // Get total count for pagination
+    // Get total count for pagination - tests that need result upload (excluding those with results)
     const totalCount = await OrderDetails.countDocuments({
       staff_id: staff_id,
-      status: 'collected',
-      result_id: { $exists: false }
+      status: { $in: ['collected', 'in_progress'] },
+      sample_collected: true,
+      _id: { $nin: existingResultDetailIds }
     });
 
     // Format response
@@ -3429,24 +3675,6 @@ exports.getOrderResultsReport = async (req, res) => {
       ? `${order.owner_id.address.street || ''}, ${order.owner_id.address.city || ''}, ${order.owner_id.address.state || ''} ${order.owner_id.address.postal_code || ''}`.trim().replace(/^,\s*/, '').replace(/,\s*$/, '')
       : null;
     const labPhone = order.owner_id?.phone_number || null;
-
-    // Get patient info
-    // Debug: Print patient information for motaz.qarmash19
-    if (order.patient_id && order.patient_id.username === 'motaz.qarmash19') {
-      console.log('🔍 DEBUG: Patient information for motaz.qarmash19:');
-      console.log('Full Name:', order.patient_id.full_name);
-      console.log('Username:', order.patient_id.username);
-      console.log('Email:', order.patient_id.email);
-      console.log('Phone Number:', order.patient_id.phone_number);
-      console.log('Patient ID:', order.patient_id.patient_id);
-      console.log('Identity Number:', order.patient_id.identity_number);
-      console.log('Birthday:', order.patient_id.birthday);
-      console.log('Gender:', order.patient_id.gender);
-      console.log('Address:', order.patient_id.address);
-      console.log('Created At:', order.patient_id.createdAt);
-      console.log('Updated At:', order.patient_id.updatedAt);
-      console.log('--- End of patient info ---');
-    }
 
     const patientInfo = order.is_patient_registered && order.patient_id
       ? {

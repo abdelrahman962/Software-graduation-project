@@ -59,11 +59,14 @@ class _AboutScreenState extends State<AboutScreen> {
       horizontal: isMobile ? 20 : 80,
       vertical: isMobile ? 70 : 110,
     ),
-    decoration: const BoxDecoration(
+    decoration: BoxDecoration(
       gradient: LinearGradient(
-        colors: [Color(0xFFe0eafc), Color(0xFFcfdef3)],
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
+        colors: [
+          Theme.of(context).colorScheme.primary,
+          Theme.of(context).colorScheme.secondary,
+        ],
       ),
     ),
     child: Column(
@@ -74,6 +77,7 @@ class _AboutScreenState extends State<AboutScreen> {
             style: Theme.of(context).textTheme.displayMedium?.copyWith(
               fontWeight: FontWeight.bold,
               fontSize: isMobile ? 34 : 52,
+              color: Colors.white,
             ),
             textAlign: TextAlign.center,
           ),
@@ -84,7 +88,7 @@ class _AboutScreenState extends State<AboutScreen> {
             'Revolutionizing medical laboratory management with cutting-edge technology',
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
               fontSize: isMobile ? 17 : 22,
-              color: Colors.grey[700],
+              color: Colors.white.withValues(alpha: 0.9),
             ),
             textAlign: TextAlign.center,
           ),

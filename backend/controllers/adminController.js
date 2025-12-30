@@ -1396,4 +1396,429 @@ exports.replyToOwnerNotification = async (req, res, next) => {
   }
 };
 
+// ==================== ADMIN REPORTS ====================
+
+/**
+ * @desc    Generate comprehensive admin reports
+ * @route   GET /api/admin/reports
+ * @access  Private (Admin)
+ */
+exports.generateReports = async (req, res, next) => {
+  try {
+    const { type = 'comprehensive', period = 'monthly', startDate, endDate } = req.query;
+
+    // Calculate date range based on period
+    let dateFilter = {};
+    const now = new Date();
+
+    if (period === 'custom' && startDate && endDate) {
+      dateFilter = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    } else {
+      const periodMap = {
+        'daily': 1,
+        'weekly': 7,
+        'monthly': 30,
+        'yearly': 365
+      };
+
+      const days = periodMap[period] || 30;
+      dateFilter = {
+        $gte: new Date(now.getTime() - (days * 24 * 60 * 60 * 1000))
+      };
+    }
+
+    const reportData = {};
+
+    // Basic platform statistics
+    const [
+      totalLabs,
+      activeLabs,
+      pendingLabs,
+      totalRevenue,
+      monthlyRevenue,
+      newRegistrations,
+      totalPatients,
+      totalTests,
+      totalOrders
+    ] = await Promise.all([
+      LabOwner.countDocuments(),
+      LabOwner.countDocuments({ status: 'approved', is_active: true }),
+      LabOwner.countDocuments({ status: 'pending' }),
+      // Total revenue: sum of subscription fees for all approved labs
+      LabOwner.aggregate([
+        { $match: { status: 'approved' } },
+        { $group: { _id: null, total: { $sum: '$subscriptionFee' } } }
+      ]),
+      // Monthly revenue: labs that started subscription in the period
+      LabOwner.aggregate([
+        { $match: { status: 'approved', date_subscription: dateFilter } },
+        { $group: { _id: null, total: { $sum: '$subscriptionFee' } } }
+      ]),
+      // New registrations in the period
+      LabOwner.countDocuments({ createdAt: dateFilter }),
+      require('../models/Patient').countDocuments(),
+      require('../models/Test').countDocuments(),
+      require('../models/Order').countDocuments()
+    ]);
+
+    // Calculate more accurate revenue metrics
+    const totalRevenueAmount = totalRevenue[0]?.total || 0;
+    const monthlyRevenueAmount = monthlyRevenue[0]?.total || 0;
+
+    // Base report data
+    reportData.platform = {
+      totalLabs: totalLabs || 0,
+      activeLabs: activeLabs || 0,
+      pendingLabs: pendingLabs || 0,
+      totalRevenue: totalRevenueAmount,
+      monthlyRevenue: monthlyRevenueAmount,
+      newRegistrations: newRegistrations || 0,
+      totalPatients: totalPatients || 0,
+      totalTests: totalTests || 0,
+      totalOrders: totalOrders || 0,
+      period,
+      generatedAt: new Date()
+    };
+
+    // Generate specific report types
+    switch (type) {
+      case 'comprehensive':
+        // Add comprehensive data
+        const labStatuses = await LabOwner.aggregate([
+          { $group: { _id: '$status', count: { $sum: 1 } } }
+        ]);
+
+        const subscriptionDistribution = await LabOwner.aggregate([
+          { $match: { status: 'approved' } },
+          { $group: { _id: '$subscriptionFee', count: { $sum: 1 } } }
+        ]);
+
+        const recentActivity = await LabOwner.find({
+          createdAt: dateFilter
+        })
+        .select('lab_name name.first name.last email status createdAt')
+        .sort({ createdAt: -1 })
+        .limit(10);
+
+        // Include all individual report data for comprehensive view
+        const compRevenueByMonth = await LabOwner.aggregate([
+          { $match: { status: 'approved', date_subscription: { $exists: true } } },
+          {
+            $group: {
+              _id: {
+                year: { $year: '$date_subscription' },
+                month: { $month: '$date_subscription' }
+              },
+              revenue: { $sum: '$subscriptionFee' },
+              count: { $sum: 1 }
+            }
+          },
+          { $sort: { '_id.year': -1, '_id.month': -1 } },
+          { $limit: 12 }
+        ]);
+
+        const compProjectedRevenue = await LabOwner.aggregate([
+          { $match: { status: 'approved', subscription_end: { $gt: new Date() } } },
+          {
+            $group: {
+              _id: {
+                year: { $year: '$subscription_end' },
+                month: { $month: '$subscription_end' }
+              },
+              expiringRevenue: { $sum: '$subscriptionFee' }
+            }
+          }
+        ]);
+
+        const compLabsByStatus = await LabOwner.aggregate([
+          {
+            $group: {
+              _id: '$status',
+              count: { $sum: 1 },
+              labs: {
+                $push: {
+                  lab_name: '$lab_name',
+                  email: '$email',
+                  subscriptionFee: '$subscriptionFee',
+                  createdAt: '$createdAt',
+                  subscription_end: '$subscription_end'
+                }
+              }
+            }
+          }
+        ]);
+
+        const compExpiringLabs = await LabOwner.find({
+          status: 'approved',
+          subscription_end: { $lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) }
+        })
+        .select('lab_name email subscription_end subscriptionFee')
+        .sort({ subscription_end: 1 });
+
+        const compSubscriptionMetrics = await LabOwner.aggregate([
+          { $match: { status: 'approved' } },
+          {
+            $group: {
+              _id: null,
+              totalRevenue: { $sum: '$subscriptionFee' },
+              averageFee: { $avg: '$subscriptionFee' },
+              minFee: { $min: '$subscriptionFee' },
+              maxFee: { $max: '$subscriptionFee' }
+            }
+          }
+        ]);
+
+        const compRenewalsNeeded = await LabOwner.countDocuments({
+          status: 'approved',
+          subscription_end: { $lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) }
+        });
+
+        const compSubscriptionTrends = await LabOwner.aggregate([
+          { $match: { status: 'approved', date_subscription: { $exists: true } } },
+          {
+            $group: {
+              _id: {
+                year: { $year: '$date_subscription' },
+                month: { $month: '$date_subscription' }
+              },
+              newSubscriptions: { $sum: 1 },
+              revenue: { $sum: '$subscriptionFee' }
+            }
+          },
+          { $sort: { '_id.year': -1, '_id.month': -1 } },
+          { $limit: 12 }
+        ]);
+
+        reportData.comprehensive = {
+          labStatuses,
+          subscriptionDistribution,
+          recentActivity,
+          growthMetrics: {
+            // Lab growth: percentage of active labs out of total approved labs
+            labGrowth: totalLabs > 0 ? ((activeLabs / totalLabs) * 100).toFixed(1) : 0,
+            // Revenue growth: compare monthly to total (simplified - ideally compare month-over-month)
+            revenueGrowth: totalRevenueAmount > 0 ? ((monthlyRevenueAmount / totalRevenueAmount) * 100).toFixed(1) : 0,
+            // New registrations this period
+            newLabsThisPeriod: newRegistrations
+          }
+        };
+
+        // Include individual report sections for comprehensive view
+        reportData.revenue = {
+          monthlyRevenue: compRevenueByMonth,
+          projectedRevenue: compProjectedRevenue,
+          averageRevenuePerLab: activeLabs > 0 ? (totalRevenueAmount / activeLabs).toFixed(2) : 0,
+          // Revenue growth: compare most recent month to previous month
+          revenueGrowth: compRevenueByMonth.length > 1 ?
+            compRevenueByMonth[1]?.revenue > 0 ?
+              (((compRevenueByMonth[0]?.revenue || 0) - (compRevenueByMonth[1]?.revenue || 0)) / compRevenueByMonth[1].revenue * 100).toFixed(1) : 0 : 0,
+          totalRevenue: totalRevenueAmount,
+          monthlyRevenueTotal: monthlyRevenueAmount
+        };
+
+        reportData.labs = {
+          totalLabs: totalLabs || 0,
+          labsByStatus: compLabsByStatus,
+          expiringLabs: compExpiringLabs,
+          activeLabs: activeLabs || 0,
+          inactiveLabs: await LabOwner.countDocuments({ is_active: false }),
+          subscriptionDistribution: await LabOwner.aggregate([
+            { $match: { status: 'approved' } },
+            { $group: { _id: '$subscriptionFee', count: { $sum: 1 } } }
+          ])
+        };
+
+        reportData.subscriptions = {
+          totalSubscriptions: activeLabs || 0,
+          activeSubscriptions: activeLabs || 0,
+          expiredSubscriptions: await LabOwner.countDocuments({
+            status: 'approved',
+            subscription_end: { $lt: new Date() }
+          }),
+          subscriptionsByStatus: await LabOwner.aggregate([
+            { $group: { _id: '$status', count: { $sum: 1 } } }
+          ]),
+          subscriptionsByTier: await LabOwner.aggregate([
+            { $match: { status: 'approved' } },
+            { $group: { _id: '$subscriptionFee', count: { $sum: 1 } } }
+          ]),
+          revenueBySubscriptionTier: await LabOwner.aggregate([
+            { $match: { status: 'approved' } },
+            { $group: { _id: '$subscriptionFee', totalRevenue: { $sum: '$subscriptionFee' }, count: { $sum: 1 } } }
+          ]),
+          metrics: compSubscriptionMetrics[0] || {},
+          renewalsNeeded: compRenewalsNeeded,
+          subscriptionTrends: compSubscriptionTrends,
+          churnRate: '0.0', // Would need historical data to calculate
+          lifetimeValue: compSubscriptionMetrics[0]?.averageFee ? (compSubscriptionMetrics[0].averageFee * 12).toFixed(2) : 0,
+          totalRevenue: totalRevenueAmount
+        };
+        break;
+
+      case 'revenue':
+        const revenueByMonth = await LabOwner.aggregate([
+          { $match: { status: 'approved', date_subscription: { $exists: true } } },
+          {
+            $group: {
+              _id: {
+                year: { $year: '$date_subscription' },
+                month: { $month: '$date_subscription' }
+              },
+              revenue: { $sum: '$subscriptionFee' },
+              count: { $sum: 1 }
+            }
+          },
+          { $sort: { '_id.year': -1, '_id.month': -1 } },
+          { $limit: 12 }
+        ]);
+
+        const projectedRevenue = await LabOwner.aggregate([
+          { $match: { status: 'approved', subscription_end: { $gt: new Date() } } },
+          {
+            $group: {
+              _id: {
+                year: { $year: '$subscription_end' },
+                month: { $month: '$subscription_end' }
+              },
+              expiringRevenue: { $sum: '$subscriptionFee' }
+            }
+          }
+        ]);
+
+        reportData.revenue = {
+          monthlyRevenue: revenueByMonth,
+          projectedRevenue,
+          averageRevenuePerLab: activeLabs > 0 ? (totalRevenueAmount / activeLabs).toFixed(2) : 0,
+          // Revenue growth: compare most recent month to previous month
+          revenueGrowth: revenueByMonth.length > 1 ?
+            revenueByMonth[1]?.revenue > 0 ?
+              (((revenueByMonth[0]?.revenue || 0) - (revenueByMonth[1]?.revenue || 0)) / revenueByMonth[1].revenue * 100).toFixed(1) : 0 : 0,
+          totalRevenue: totalRevenueAmount,
+          monthlyRevenueTotal: monthlyRevenueAmount
+        };
+        break;
+
+      case 'labs':
+        const labsByStatus = await LabOwner.aggregate([
+          {
+            $group: {
+              _id: '$status',
+              count: { $sum: 1 },
+              labs: {
+                $push: {
+                  lab_name: '$lab_name',
+                  email: '$email',
+                  subscriptionFee: '$subscriptionFee',
+                  createdAt: '$createdAt',
+                  subscription_end: '$subscription_end'
+                }
+              }
+            }
+          }
+        ]);
+
+        const expiringLabs = await LabOwner.find({
+          status: 'approved',
+          subscription_end: { $lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) }
+        })
+        .select('lab_name email subscription_end subscriptionFee')
+        .sort({ subscription_end: 1 });
+
+        reportData.labs = {
+          totalLabs: totalLabs || 0,
+          labsByStatus,
+          expiringLabs,
+          activeLabs: activeLabs || 0,
+          inactiveLabs: await LabOwner.countDocuments({ is_active: false }),
+          subscriptionDistribution: await LabOwner.aggregate([
+            { $match: { status: 'approved' } },
+            { $group: { _id: '$subscriptionFee', count: { $sum: 1 } } }
+          ])
+        };
+        break;
+
+      case 'subscriptions':
+        const subscriptionMetrics = await LabOwner.aggregate([
+          { $match: { status: 'approved' } },
+          {
+            $group: {
+              _id: null,
+              totalRevenue: { $sum: '$subscriptionFee' },
+              averageFee: { $avg: '$subscriptionFee' },
+              minFee: { $min: '$subscriptionFee' },
+              maxFee: { $max: '$subscriptionFee' }
+            }
+          }
+        ]);
+
+        const renewalsNeeded = await LabOwner.countDocuments({
+          status: 'approved',
+          subscription_end: { $lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) }
+        });
+
+        const subscriptionTrends = await LabOwner.aggregate([
+          { $match: { status: 'approved', date_subscription: { $exists: true } } },
+          {
+            $group: {
+              _id: {
+                year: { $year: '$date_subscription' },
+                month: { $month: '$date_subscription' }
+              },
+              newSubscriptions: { $sum: 1 },
+              revenue: { $sum: '$subscriptionFee' }
+            }
+          },
+          { $sort: { '_id.year': -1, '_id.month': -1 } },
+          { $limit: 12 }
+        ]);
+
+        reportData.subscriptions = {
+          totalSubscriptions: activeLabs || 0,
+          activeSubscriptions: activeLabs || 0,
+          expiredSubscriptions: await LabOwner.countDocuments({
+            status: 'approved',
+            subscription_end: { $lt: new Date() }
+          }),
+          subscriptionsByStatus: await LabOwner.aggregate([
+            { $group: { _id: '$status', count: { $sum: 1 } } }
+          ]),
+          subscriptionsByTier: await LabOwner.aggregate([
+            { $match: { status: 'approved' } },
+            { $group: { _id: '$subscriptionFee', count: { $sum: 1 } } }
+          ]),
+          revenueBySubscriptionTier: await LabOwner.aggregate([
+            { $match: { status: 'approved' } },
+            { $group: { _id: '$subscriptionFee', totalRevenue: { $sum: '$subscriptionFee' }, count: { $sum: 1 } } }
+          ]),
+          metrics: subscriptionMetrics[0] || {},
+          renewalsNeeded,
+          subscriptionTrends,
+          churnRate: '0.0', // Would need historical data to calculate
+          lifetimeValue: subscriptionMetrics[0]?.averageFee ? (subscriptionMetrics[0].averageFee * 12).toFixed(2) : 0,
+          totalRevenue: totalRevenueAmount
+        };
+        break;
+    }
+
+    res.json({
+      success: true,
+      report: {
+        type,
+        period,
+        dateRange: dateFilter,
+        data: reportData
+      }
+    });
+
+  } catch (err) {
+    console.error('Report generation error:', err);
+    next(err);
+  }
+};
+
+module.exports = exports;
+
 

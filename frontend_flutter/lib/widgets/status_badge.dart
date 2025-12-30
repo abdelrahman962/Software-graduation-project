@@ -45,12 +45,6 @@ class StatusBadge extends StatelessWidget {
           'border': Colors.blue.shade200,
           'text': Colors.blue.shade900,
         };
-      case 'urgent':
-        return {
-          'background': Colors.red.shade50,
-          'border': Colors.red.shade300,
-          'text': Colors.red.shade900,
-        };
       case 'collected':
       case 'in_progress':
       case 'in progress':

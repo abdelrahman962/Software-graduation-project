@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import 'package:responsive_framework/responsive_framework.dart';
+import 'package:intl/intl.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../services/admin_service.dart';
@@ -11,7 +12,7 @@ import '../../config/theme.dart';
 import '../../widgets/admin_sidebar.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'dart:async';
-import 'admin_profile_screen.dart';
+import 'admin_reports_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -76,6 +77,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
   }
 
+  Future<void> _refreshDashboardData() async {
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      ApiService.setAuthToken(authProvider.token);
+
+      final result = await ApiService.get(ApiConfig.adminDashboard);
+
+      if (mounted) {
+        setState(() {
+          _dashboardData = result is Map<String, dynamic> ? result : {};
+          _refreshKey++; // Force refresh
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error refreshing dashboard: $e')),
+        );
+      }
+    }
+  }
+
   void _handleNavigation(int index) {
     setState(() => _selectedIndex = index);
 
@@ -98,10 +121,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       case 5: // Feedback - show in main content
         // Content shown when _selectedIndex == 5
         break;
-      case 6: // Settings
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Settings panel coming soon!')),
-        );
+      case 6: // System Reports
+        // Content shown when _selectedIndex == 6
         break;
       default:
         break;
@@ -123,6 +144,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final authProvider = Provider.of<AuthProvider>(context);
     final isMobile = ResponsiveBreakpoints.of(context).isMobile;
     final isVerySmall = MediaQuery.of(context).size.width < 500;
+
+    // Show loading while auth state is being determined
+    if (authProvider.token == null && authProvider.user == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     if (!authProvider.isAuthenticated) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -153,13 +179,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   context,
                 ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  onPressed: _loadDashboardData,
-                  tooltip: 'Refresh dashboard',
-                ),
-              ],
             )
           : AppBar(
               backgroundColor: Theme.of(context).colorScheme.surface,
@@ -211,12 +230,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ],
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  onPressed: _loadDashboardData,
-                  tooltip: 'Refresh dashboard',
-                ),
-                const SizedBox(width: 16),
               ],
             ),
       drawer: isMobile
@@ -309,9 +322,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         AppAnimations.fadeIn(
                           _buildFeedbackSection(context, isMobile, isVerySmall),
                         ),
-                      // Profile Section
+                      // System Reports Section
                       if (_selectedIndex == 6)
-                        AppAnimations.fadeIn(const AdminProfileScreen()),
+                        AppAnimations.fadeIn(const AdminReportsScreen()),
                     ],
                   ),
                 ),
@@ -610,15 +623,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         'icon': Icons.payment,
         'color': AppTheme.successGreen,
         'onTap': () => _showSubscriptionsDialog(context),
-      },
-      {
-        'title': 'System Reports',
-        'subtitle': 'Generate detailed analytics reports',
-        'icon': Icons.analytics,
-        'color': AppTheme.secondaryTeal,
-        'onTap': () => ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('System Reports coming soon!')),
-        ),
       },
     ];
 
@@ -3234,10 +3238,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             backgroundColor: AppTheme.successGreen,
           ),
         );
-        // Refresh the pending approvals section
-        setState(() {
-          _refreshKey++;
-        });
+        // Refresh the dashboard data to update statistics
+        await _refreshDashboardData();
       } else {
         throw Exception(result['message'] ?? 'Approval failed');
       }
@@ -3313,10 +3315,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               backgroundColor: AppTheme.errorRed,
             ),
           );
-          // Refresh the pending approvals section
-          setState(() {
-            _refreshKey++;
-          });
+          // Refresh the dashboard data to update statistics
+          await _refreshDashboardData();
         } else {
           throw Exception(apiResult['message'] ?? 'Rejection failed');
         }
@@ -3679,6 +3679,271 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showSystemReportsDialog(BuildContext context) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) =>
+          const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      // Fetch comprehensive report data
+      final response = await ApiService.get(
+        '/admin/reports',
+        params: {'type': 'comprehensive', 'period': 'monthly'},
+      );
+
+      if (!mounted) return;
+
+      Navigator.of(context, rootNavigator: true).pop(); // Close loading dialog
+
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.analytics, color: AppTheme.secondaryTeal),
+              const SizedBox(width: 12),
+              const Text('System Reports'),
+            ],
+          ),
+          content: SizedBox(
+            width: MediaQuery.of(context).size.width * 0.9,
+            height: MediaQuery.of(context).size.height * 0.8,
+            child: response != null && response['success'] == true
+                ? _buildReportsDialogContent(response['report'])
+                : const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.error_outline, size: 48, color: Colors.red),
+                        SizedBox(height: 16),
+                        Text('Failed to load reports data'),
+                      ],
+                    ),
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                // Navigate to full reports screen
+                setState(() => _selectedIndex = 6);
+                Navigator.pop(dialogContext);
+              },
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('View Full Reports'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.secondaryTeal,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(
+          context,
+          rootNavigator: true,
+        ).pop(); // Close loading dialog
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Error loading reports: $e')));
+        }
+      }
+    }
+  }
+
+  Widget _buildReportsDialogContent(Map<String, dynamic> report) {
+    final data = report['data'] as Map<String, dynamic>?;
+    final platform = data?['platform'] as Map<String, dynamic>?;
+
+    if (platform == null) {
+      return const Center(child: Text('No data available'));
+    }
+
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header with report info
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.secondaryTeal.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Report Type: ${report['type']?.toString().toUpperCase() ?? 'Unknown'}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Period: ${report['period']?.toString().toUpperCase() ?? 'Unknown'}',
+                  style: TextStyle(color: AppTheme.textLight, fontSize: 14),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Generated: ${platform['generatedAt'] != null ? DateFormat('MMM dd, yyyy HH:mm').format(DateTime.parse(platform['generatedAt'])) : 'Unknown'}',
+                  style: TextStyle(color: AppTheme.textLight, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // Platform Overview Cards
+          const Text(
+            'Platform Overview',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            children: [
+              _buildMetricCard(
+                'Total Labs',
+                platform['totalLabs']?.toString() ?? '0',
+                Icons.science,
+                AppTheme.primaryBlue,
+              ),
+              _buildMetricCard(
+                'Active Labs',
+                platform['activeLabs']?.toString() ?? '0',
+                Icons.check_circle,
+                AppTheme.successGreen,
+              ),
+              _buildMetricCard(
+                'Pending Labs',
+                platform['pendingLabs']?.toString() ?? '0',
+                Icons.pending,
+                AppTheme.accentOrange,
+              ),
+              _buildMetricCard(
+                'Total Revenue',
+                '\$${platform['totalRevenue']?.toString() ?? '0'}',
+                Icons.attach_money,
+                AppTheme.secondaryTeal,
+              ),
+              _buildMetricCard(
+                'Monthly Revenue',
+                '\$${platform['monthlyRevenue']?.toString() ?? '0'}',
+                Icons.trending_up,
+                AppTheme.successGreen,
+              ),
+              _buildMetricCard(
+                'New Registrations',
+                platform['newRegistrations']?.toString() ?? '0',
+                Icons.person_add,
+                AppTheme.primaryBlue,
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+
+          // Additional metrics
+          const Text(
+            'Additional Metrics',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+
+          Row(
+            children: [
+              Expanded(
+                child: _buildMetricCard(
+                  'Total Patients',
+                  platform['totalPatients']?.toString() ?? '0',
+                  Icons.people,
+                  AppTheme.accentOrange,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildMetricCard(
+                  'Total Tests',
+                  platform['totalTests']?.toString() ?? '0',
+                  Icons.biotech,
+                  AppTheme.secondaryTeal,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildMetricCard(
+                  'Total Orders',
+                  platform['totalOrders']?.toString() ?? '0',
+                  Icons.assignment,
+                  AppTheme.primaryBlue,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricCard(
+    String title,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: color, size: 24),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(fontSize: 14, color: AppTheme.textLight),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

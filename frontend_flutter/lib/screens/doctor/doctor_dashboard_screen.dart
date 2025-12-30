@@ -102,6 +102,11 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
   Widget build(BuildContext context) {
     final authProvider = Provider.of<DoctorAuthProvider>(context);
 
+    // Show loading while auth state is being determined
+    if (authProvider.token == null && authProvider.user == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     if (!authProvider.isAuthenticated) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         context.go('/login');
@@ -152,12 +157,7 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await authProvider.logout();
-              // Small delay to ensure logout is complete before navigation
-              await Future.delayed(const Duration(milliseconds: 50));
-              if (context.mounted) context.go('/');
-            },
+            onPressed: _showLogoutDialog,
           ),
         ],
       ),
@@ -664,9 +664,6 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
                       IconData icon;
 
                       switch (notification['type']) {
-                        case 'urgent':
-                          icon = Icons.warning;
-                          break;
                         case 'info':
                           icon = Icons.info;
                           break;
@@ -812,5 +809,35 @@ class _DoctorDashboardScreenState extends State<DoctorDashboardScreen> {
     } catch (e) {
       return dateString;
     }
+  }
+
+  void _showLogoutDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              final authProvider = Provider.of<DoctorAuthProvider>(
+                context,
+                listen: false,
+              );
+              await authProvider.logout();
+              // Small delay to ensure logout is complete before navigation
+              await Future.delayed(const Duration(milliseconds: 50));
+              if (context.mounted) context.go('/');
+            },
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
   }
 }

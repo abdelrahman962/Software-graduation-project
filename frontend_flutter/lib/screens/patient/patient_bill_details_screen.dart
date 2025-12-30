@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:http/http.dart' as http;
+import 'package:printing/printing.dart';
 import '../../providers/patient_auth_provider.dart';
 import '../../services/patient_api_service.dart';
 import '../../config/theme.dart';
@@ -81,6 +83,76 @@ class _PatientBillDetailsScreenState extends State<PatientBillDetailsScreen> {
     }
   }
 
+  Future<void> _downloadInvoicePDF() async {
+    if (_invoice == null) return;
+
+    try {
+      // Show loading indicator
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Generating PDF...'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+
+      // Get the invoice ID
+      final invoiceId = _invoice!['_id']?.toString();
+      if (invoiceId == null) {
+        throw Exception('Invoice ID not found');
+      }
+
+      // Get auth token
+      final authProvider = Provider.of<PatientAuthProvider>(
+        context,
+        listen: false,
+      );
+      final token = authProvider.token;
+      if (token == null) {
+        throw Exception('Authentication required');
+      }
+
+      // Download PDF from server
+      final url = Uri.parse(
+        'http://localhost:5000/api/patient/invoices/$invoiceId/download',
+      );
+      final response = await http.get(
+        url,
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 200) {
+        // Convert response bytes to Uint8List for printing package
+        final pdfBytes = response.bodyBytes;
+
+        // Use printing package to show PDF preview/download dialog
+        await Printing.layoutPdf(
+          onLayout: (format) async => pdfBytes,
+          name: 'Invoice_${_invoice!['invoice_id'] ?? 'N/A'}.pdf',
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('PDF downloaded successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        final errorBody = response.body;
+        final errorMessage = errorBody.contains('message')
+            ? errorBody.split('"message":"')[1].split('"')[0]
+            : 'Download failed';
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to download PDF: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<PatientAuthProvider>(context);
@@ -96,6 +168,14 @@ class _PatientBillDetailsScreenState extends State<PatientBillDetailsScreen> {
             color: AppTheme.primaryBlue,
           ),
         ),
+        actions: [
+          if (_invoice != null)
+            IconButton(
+              icon: const Icon(Icons.download),
+              tooltip: 'Download PDF',
+              onPressed: () => _downloadInvoicePDF(),
+            ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())

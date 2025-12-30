@@ -63,9 +63,11 @@ class _ServicesScreenState extends State<ServicesScreen> {
       ),
       decoration: BoxDecoration(
         gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
           colors: [
-            Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
-            Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1),
+            Theme.of(context).colorScheme.primary,
+            Theme.of(context).colorScheme.secondary,
           ],
         ),
       ),
@@ -77,6 +79,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
               style: Theme.of(context).textTheme.displayLarge?.copyWith(
                 fontWeight: FontWeight.bold,
                 fontSize: isMobile ? 32 : 48,
+                color: Colors.white,
               ),
               textAlign: TextAlign.center,
             ),
@@ -87,7 +90,7 @@ class _ServicesScreenState extends State<ServicesScreen> {
               'Comprehensive laboratory management features designed for modern medical facilities',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontSize: isMobile ? 16 : 20,
-                color: Colors.grey[700],
+                color: Colors.white.withValues(alpha: 0.9),
               ),
               textAlign: TextAlign.center,
             ),

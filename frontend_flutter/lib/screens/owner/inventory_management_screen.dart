@@ -348,10 +348,6 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen> {
     final count = item['count'] ?? 0;
     final criticalLevel = item['critical_level'] ?? 0;
     final isLowStock = count <= criticalLevel;
-    final expirationDate = item['expiration_date'];
-    final isExpiringSoon =
-        expirationDate != null &&
-        DateTime.parse(expirationDate).difference(DateTime.now()).inDays <= 30;
 
     return AnimatedCard(
       onTap: () => _editInventoryItem(item),
@@ -507,51 +503,28 @@ class _InventoryManagementScreenState extends State<InventoryManagementScreen> {
                 ],
               ],
             ),
-            if (isLowStock || isExpiringSoon) ...[
+            if (isLowStock) ...[
               const SizedBox(height: 6),
               Row(
                 children: [
-                  if (isLowStock) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text(
-                        'LOW STOCK',
-                        style: TextStyle(
-                          color: Colors.red,
-                          fontSize: 8,
-                          fontWeight: FontWeight.bold,
-                        ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'LOW STOCK',
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontSize: 8,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ],
-                  if (isExpiringSoon) ...[
-                    const SizedBox(width: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text(
-                        'EXPIRING SOON',
-                        style: TextStyle(
-                          color: Colors.orange,
-                          fontSize: 8,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ],
               ),
             ],

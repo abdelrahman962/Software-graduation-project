@@ -56,6 +56,13 @@ router.get('/feedback/system', publicController.getSystemFeedback);
 router.post('/contact', publicController.submitContactForm);
 
 /**
+ * @route   GET /api/public/subscription-tiers
+ * @desc    Get available subscription tiers for lab owner registration
+ * @access  Public
+ */
+router.get('/subscription-tiers', publicController.getSubscriptionTiers);
+
+/**
  * @route   POST /api/public/owner/register
  * @desc    Lab owner self-registration (pending admin approval)
  * @access  Public

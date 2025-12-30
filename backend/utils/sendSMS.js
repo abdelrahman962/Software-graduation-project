@@ -5,10 +5,10 @@
 const sendSMS = async (phoneNumber, message) => {
   try {
     // For now, just log the SMS that would be sent
-    console.log('📱 SMS would be sent:');
-    console.log(`To: ${phoneNumber}`);
-    console.log(`Message: ${message}`);
-    console.log('---');
+    // console.log('📱 SMS would be sent:');
+    // console.log(`To: ${phoneNumber}`);
+    // console.log(`Message: ${message}`);
+    // console.log('---');
 
     // Simulate successful SMS sending
     return { success: true, message: 'SMS logged (not actually sent)' };

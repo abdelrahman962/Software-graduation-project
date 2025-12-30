@@ -54,15 +54,15 @@ class _StaffInvoiceDetailsScreenState extends State<StaffInvoiceDetailsScreen> {
       final response = await StaffApiService.getInvoiceDetails(invoice['_id']);
 
       // Debug: Log invoice details response
-      print(
-        '🔍 FRONTEND DEBUG: Invoice details response for order ${widget.orderId}:',
-      );
-      print('Invoice: ${response['invoice']}');
-      print('Totals: ${response['totals']}');
-      print('Tests: ${response['tests']?.length ?? 0} tests');
-      response['tests']?.forEach((test) {
-        print('Test: ${test['test_name']}, Price: ${test['price']}');
-      });
+      // print(
+      //   '🔍 FRONTEND DEBUG: Invoice details response for order ${widget.orderId}:',
+      // );
+      // print('Invoice: ${response['invoice']}');
+      // print('Totals: ${response['totals']}');
+      // print('Tests: ${response['tests']?.length ?? 0} tests');
+      // response['tests']?.forEach((test) {
+      //   print('Test: ${test['test_name']}, Price: ${test['price']}');
+      // });
 
       if (mounted) {
         setState(() {
@@ -578,9 +578,9 @@ class _StaffInvoiceDetailsScreenState extends State<StaffInvoiceDetailsScreen> {
         Builder(
           builder: (context) {
             final totalValue = totals['total'] ?? 0;
-            print(
-              '🔍 FRONTEND DEBUG: Displaying invoice total: $totalValue (subtotal: ${totals['subtotal']}, tax: ${totals['tax']}, discount: ${totals['discount']})',
-            );
+            // print(
+            //   '🔍 FRONTEND DEBUG: Displaying invoice total: $totalValue (subtotal: ${totals['subtotal']}, tax: ${totals['tax']}, discount: ${totals['discount']})',
+            // );
             return _buildSummaryRow(
               'Total Amount',
               totalValue,

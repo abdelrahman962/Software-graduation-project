@@ -55,6 +55,7 @@ class StaffSidebar extends StatelessWidget {
           // Navigation Sections
           Expanded(
             child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -103,14 +104,14 @@ class StaffSidebar extends StatelessWidget {
                       'Logout',
                       Icons.logout,
                       -1,
-                      onTap: () => _logout(context),
+                      onTap: () => _showLogoutDialog(context),
                     ),
                   ]),
                 ],
-              ),
-            ),
-          ),
-        ],
+              ), // Close Column
+            ), // Close SingleChildScrollView
+          ), // Close Expanded
+        ], // Close Container Column children
       ),
     );
   }
@@ -145,7 +146,6 @@ class StaffSidebar extends StatelessWidget {
     IconData icon,
     int index, {
     VoidCallback? onTap,
-    bool isSpecial = false,
   }) {
     final isSelected = selectedIndex == index;
 
@@ -190,15 +190,35 @@ class StaffSidebar extends StatelessWidget {
     );
   }
 
-  void _logout(BuildContext context) async {
+  void _showLogoutDialog(BuildContext context) {
     final authProvider = Provider.of<StaffAuthProvider>(context, listen: false);
-    await authProvider.logout();
-    if (context.mounted) {
-      // Small delay to ensure logout is complete before navigation
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (context.mounted) {
-        context.go('/');
-      }
-    }
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await authProvider.logout();
+              // Small delay to ensure logout is complete before navigation
+              await Future.delayed(const Duration(milliseconds: 50));
+              // Use post frame callback to ensure navigation happens after dialog is closed
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (context.mounted) {
+                  GoRouter.of(context).go('/');
+                }
+              });
+            },
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
   }
 }

@@ -398,4 +398,54 @@ class OwnerApiService {
 
     return await ApiService.get('/owner/invoices', params: queryParams);
   }
+
+  static Future<Map<String, dynamic>> getInvoiceByOrderId(
+    String orderId,
+  ) async {
+    await ensureTokenInitialized();
+    return await ApiService.get('/owner/invoices/order/$orderId');
+  }
+
+  static Future<Map<String, dynamic>> getInvoiceDetails(
+    String invoiceId,
+  ) async {
+    await ensureTokenInitialized();
+    return await ApiService.get('/owner/invoices/$invoiceId');
+  }
+
+  static Future<Map<String, dynamic>> getOrderById(String orderId) async {
+    await ensureTokenInitialized();
+    return await ApiService.get('/owner/orders/$orderId');
+  }
+
+  // Audit Logs
+  static Future<Map<String, dynamic>> getAuditLogs({
+    int page = 1,
+    int limit = 50,
+    String? startDate,
+    String? endDate,
+    String? action,
+    String? staffId,
+  }) async {
+    await ensureTokenInitialized();
+    final queryParams = <String, String>{
+      'page': page.toString(),
+      'limit': limit.toString(),
+    };
+
+    if (startDate != null) queryParams['startDate'] = startDate;
+    if (endDate != null) queryParams['endDate'] = endDate;
+    if (action != null) queryParams['action'] = action;
+    if (staffId != null) queryParams['staff_id'] = staffId;
+
+    final queryString = queryParams.entries
+        .map((e) => '${e.key}=${e.value}')
+        .join('&');
+    return await ApiService.get('/owner/audit-logs?$queryString');
+  }
+
+  static Future<Map<String, dynamic>> getAuditLogActions() async {
+    await ensureTokenInitialized();
+    return await ApiService.get('/owner/audit-logs/actions');
+  }
 }

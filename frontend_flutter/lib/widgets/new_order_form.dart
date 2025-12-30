@@ -420,211 +420,425 @@ class _NewOrderFormState extends State<NewOrderForm> {
                   const SizedBox(height: 24),
 
                   // Name Fields
-                  Row(
-                    children: [
-                      Expanded(
-                        child: CustomTextField(
-                          controller: _firstNameController,
-                          label: 'First Name',
-                          prefixIcon: Icons.person_outline,
-                          validator: (value) {
-                            if (value?.isEmpty ?? true) {
-                              return 'First name is required';
-                            }
-                            return null;
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: CustomTextField(
-                          controller: _middleNameController,
-                          label: 'Middle Name',
-                          prefixIcon: Icons.person_outline,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: CustomTextField(
-                          controller: _lastNameController,
-                          label: 'Last Name',
-                          prefixIcon: Icons.person_outline,
-                          validator: (value) {
-                            if (value?.isEmpty ?? true) {
-                              return 'Last name is required';
-                            }
-                            return null;
-                          },
-                        ),
-                      ),
-                    ],
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isWide = constraints.maxWidth > 800;
+                      return isWide
+                          ? Row(
+                              children: [
+                                Expanded(
+                                  child: CustomTextField(
+                                    controller: _firstNameController,
+                                    label: 'First Name',
+                                    prefixIcon: Icons.person_outline,
+                                    validator: (value) {
+                                      if (value?.isEmpty ?? true) {
+                                        return 'First name is required';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: CustomTextField(
+                                    controller: _middleNameController,
+                                    label: 'Middle Name',
+                                    prefixIcon: Icons.person_outline,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: CustomTextField(
+                                    controller: _lastNameController,
+                                    label: 'Last Name',
+                                    prefixIcon: Icons.person_outline,
+                                    validator: (value) {
+                                      if (value?.isEmpty ?? true) {
+                                        return 'Last name is required';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Column(
+                              children: [
+                                CustomTextField(
+                                  controller: _firstNameController,
+                                  label: 'First Name',
+                                  prefixIcon: Icons.person_outline,
+                                  validator: (value) {
+                                    if (value?.isEmpty ?? true) {
+                                      return 'First name is required';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                                const SizedBox(height: 16),
+                                CustomTextField(
+                                  controller: _middleNameController,
+                                  label: 'Middle Name',
+                                  prefixIcon: Icons.person_outline,
+                                ),
+                                const SizedBox(height: 16),
+                                CustomTextField(
+                                  controller: _lastNameController,
+                                  label: 'Last Name',
+                                  prefixIcon: Icons.person_outline,
+                                  validator: (value) {
+                                    if (value?.isEmpty ?? true) {
+                                      return 'Last name is required';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                              ],
+                            );
+                    },
                   ),
                   const SizedBox(height: 16),
 
                   // Identity & Contact
-                  Row(
-                    children: [
-                      Expanded(
-                        child: CustomTextField(
-                          controller: _identityNumberController,
-                          label: 'Identity Number',
-                          prefixIcon: Icons.badge,
-                          validator: (value) {
-                            if (value?.isEmpty ?? true) {
-                              return 'Identity number is required';
-                            }
-                            return null;
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: CustomTextField(
-                          controller: _emailController,
-                          label: 'Email',
-                          prefixIcon: Icons.email,
-                          keyboardType: TextInputType.emailAddress,
-                          validator: (value) {
-                            if (value?.isEmpty ?? true) {
-                              return 'Email is required';
-                            }
-                            if (!value!.contains('@')) {
-                              return 'Invalid email';
-                            }
-                            return null;
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: CustomTextField(
-                          controller: _phoneController,
-                          label: 'Phone Number',
-                          prefixIcon: Icons.phone,
-                          keyboardType: TextInputType.phone,
-                          validator: (value) {
-                            if (value?.isEmpty ?? true) {
-                              return 'Phone number is required';
-                            }
-                            return null;
-                          },
-                        ),
-                      ),
-                    ],
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isWide = constraints.maxWidth > 800;
+                      return isWide
+                          ? Row(
+                              children: [
+                                Expanded(
+                                  child: CustomTextField(
+                                    controller: _identityNumberController,
+                                    label: 'Identity Number',
+                                    prefixIcon: Icons.badge,
+                                    validator: (value) {
+                                      if (value?.isEmpty ?? true) {
+                                        return 'Identity number is required';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: CustomTextField(
+                                    controller: _emailController,
+                                    label: 'Email',
+                                    prefixIcon: Icons.email,
+                                    keyboardType: TextInputType.emailAddress,
+                                    validator: (value) {
+                                      if (value?.isEmpty ?? true) {
+                                        return 'Email is required';
+                                      }
+                                      if (!value!.contains('@')) {
+                                        return 'Invalid email';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: CustomTextField(
+                                    controller: _phoneController,
+                                    label: 'Phone Number',
+                                    prefixIcon: Icons.phone,
+                                    keyboardType: TextInputType.phone,
+                                    validator: (value) {
+                                      if (value?.isEmpty ?? true) {
+                                        return 'Phone number is required';
+                                      }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Column(
+                              children: [
+                                CustomTextField(
+                                  controller: _identityNumberController,
+                                  label: 'Identity Number',
+                                  prefixIcon: Icons.badge,
+                                  validator: (value) {
+                                    if (value?.isEmpty ?? true) {
+                                      return 'Identity number is required';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                                const SizedBox(height: 16),
+                                CustomTextField(
+                                  controller: _emailController,
+                                  label: 'Email',
+                                  prefixIcon: Icons.email,
+                                  keyboardType: TextInputType.emailAddress,
+                                  validator: (value) {
+                                    if (value?.isEmpty ?? true) {
+                                      return 'Email is required';
+                                    }
+                                    if (!value!.contains('@')) {
+                                      return 'Invalid email';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                                const SizedBox(height: 16),
+                                CustomTextField(
+                                  controller: _phoneController,
+                                  label: 'Phone Number',
+                                  prefixIcon: Icons.phone,
+                                  keyboardType: TextInputType.phone,
+                                  validator: (value) {
+                                    if (value?.isEmpty ?? true) {
+                                      return 'Phone number is required';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                              ],
+                            );
+                    },
                   ),
                   const SizedBox(height: 16),
 
                   // Birthday & Gender & Social Status
-                  Row(
-                    children: [
-                      Expanded(
-                        child: InkWell(
-                          onTap: _selectBirthday,
-                          child: InputDecorator(
-                            decoration: const InputDecoration(
-                              labelText: 'Birthday',
-                              prefixIcon: Icon(Icons.calendar_today),
-                              border: OutlineInputBorder(),
-                            ),
-                            child: Text(
-                              _birthday == null
-                                  ? 'Select birthday'
-                                  : '${_birthday!.year}-${_birthday!.month.toString().padLeft(2, '0')}-${_birthday!.day.toString().padLeft(2, '0')}',
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _selectedGender,
-                          decoration: const InputDecoration(
-                            labelText: 'Gender',
-                            prefixIcon: Icon(Icons.wc),
-                            border: OutlineInputBorder(),
-                          ),
-                          items: ['Male', 'Female', 'Other'].map((gender) {
-                            return DropdownMenuItem(
-                              value: gender,
-                              child: Text(gender),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isWide = constraints.maxWidth > 800;
+                      return isWide
+                          ? Row(
+                              children: [
+                                Expanded(
+                                  child: InkWell(
+                                    onTap: _selectBirthday,
+                                    child: InputDecorator(
+                                      decoration: const InputDecoration(
+                                        labelText: 'Birthday',
+                                        prefixIcon: Icon(Icons.calendar_today),
+                                        border: OutlineInputBorder(),
+                                      ),
+                                      child: Text(
+                                        _birthday == null
+                                            ? 'Select birthday'
+                                            : '${_birthday!.year}-${_birthday!.month.toString().padLeft(2, '0')}-${_birthday!.day.toString().padLeft(2, '0')}',
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: DropdownButtonFormField<String>(
+                                    initialValue: _selectedGender,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Gender',
+                                      prefixIcon: Icon(Icons.wc),
+                                      border: OutlineInputBorder(),
+                                    ),
+                                    items: ['Male', 'Female', 'Other'].map((
+                                      gender,
+                                    ) {
+                                      return DropdownMenuItem(
+                                        value: gender,
+                                        child: Text(gender),
+                                      );
+                                    }).toList(),
+                                    onChanged: (value) {
+                                      if (value != null) {
+                                        setState(() => _selectedGender = value);
+                                      }
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: DropdownButtonFormField<String>(
+                                    initialValue: _selectedSocialStatus,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Social Status',
+                                      prefixIcon: Icon(Icons.family_restroom),
+                                      border: OutlineInputBorder(),
+                                    ),
+                                    items:
+                                        [
+                                          'Single',
+                                          'Married',
+                                          'Divorced',
+                                          'Widowed',
+                                        ].map((status) {
+                                          return DropdownMenuItem(
+                                            value: status,
+                                            child: Text(status),
+                                          );
+                                        }).toList(),
+                                    onChanged: (value) {
+                                      if (value != null) {
+                                        setState(
+                                          () => _selectedSocialStatus = value,
+                                        );
+                                      }
+                                    },
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Column(
+                              children: [
+                                InkWell(
+                                  onTap: _selectBirthday,
+                                  child: InputDecorator(
+                                    decoration: const InputDecoration(
+                                      labelText: 'Birthday',
+                                      prefixIcon: Icon(Icons.calendar_today),
+                                      border: OutlineInputBorder(),
+                                    ),
+                                    child: Text(
+                                      _birthday == null
+                                          ? 'Select birthday'
+                                          : '${_birthday!.year}-${_birthday!.month.toString().padLeft(2, '0')}-${_birthday!.day.toString().padLeft(2, '0')}',
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                DropdownButtonFormField<String>(
+                                  initialValue: _selectedGender,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Gender',
+                                    prefixIcon: Icon(Icons.wc),
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  items: ['Male', 'Female', 'Other'].map((
+                                    gender,
+                                  ) {
+                                    return DropdownMenuItem(
+                                      value: gender,
+                                      child: Text(gender),
+                                    );
+                                  }).toList(),
+                                  onChanged: (value) {
+                                    if (value != null) {
+                                      setState(() => _selectedGender = value);
+                                    }
+                                  },
+                                ),
+                                const SizedBox(height: 16),
+                                DropdownButtonFormField<String>(
+                                  initialValue: _selectedSocialStatus,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Social Status',
+                                    prefixIcon: Icon(Icons.family_restroom),
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  items:
+                                      [
+                                        'Single',
+                                        'Married',
+                                        'Divorced',
+                                        'Widowed',
+                                      ].map((status) {
+                                        return DropdownMenuItem(
+                                          value: status,
+                                          child: Text(status),
+                                        );
+                                      }).toList(),
+                                  onChanged: (value) {
+                                    if (value != null) {
+                                      setState(
+                                        () => _selectedSocialStatus = value,
+                                      );
+                                    }
+                                  },
+                                ),
+                              ],
                             );
-                          }).toList(),
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() => _selectedGender = value);
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _selectedSocialStatus,
-                          decoration: const InputDecoration(
-                            labelText: 'Social Status',
-                            prefixIcon: Icon(Icons.family_restroom),
-                            border: OutlineInputBorder(),
-                          ),
-                          items: ['Single', 'Married', 'Divorced', 'Widowed']
-                              .map((status) {
-                                return DropdownMenuItem(
-                                  value: status,
-                                  child: Text(status),
-                                );
-                              })
-                              .toList(),
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() => _selectedSocialStatus = value);
-                            }
-                          },
-                        ),
-                      ),
-                    ],
+                    },
                   ),
                   const SizedBox(height: 16),
 
                   // Address Fields
-                  Row(
-                    children: [
-                      Expanded(
-                        child: CustomTextField(
-                          controller: _streetController,
-                          label: 'Street Address',
-                          prefixIcon: Icons.location_on,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: CustomTextField(
-                          controller: _cityController,
-                          label: 'City',
-                          prefixIcon: Icons.location_city,
-                        ),
-                      ),
-                    ],
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isWide = constraints.maxWidth > 600;
+                      return isWide
+                          ? Row(
+                              children: [
+                                Expanded(
+                                  child: CustomTextField(
+                                    controller: _streetController,
+                                    label: 'Street Address',
+                                    prefixIcon: Icons.location_on,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: CustomTextField(
+                                    controller: _cityController,
+                                    label: 'City',
+                                    prefixIcon: Icons.location_city,
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Column(
+                              children: [
+                                CustomTextField(
+                                  controller: _streetController,
+                                  label: 'Street Address',
+                                  prefixIcon: Icons.location_on,
+                                ),
+                                const SizedBox(height: 16),
+                                CustomTextField(
+                                  controller: _cityController,
+                                  label: 'City',
+                                  prefixIcon: Icons.location_city,
+                                ),
+                              ],
+                            );
+                    },
                   ),
                   const SizedBox(height: 16),
 
                   // Insurance Information
-                  Row(
-                    children: [
-                      Expanded(
-                        child: CustomTextField(
-                          controller: _insuranceProviderController,
-                          label: 'Insurance Provider',
-                          prefixIcon: Icons.health_and_safety,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: CustomTextField(
-                          controller: _insuranceNumberController,
-                          label: 'Insurance Number',
-                          prefixIcon: Icons.confirmation_number,
-                        ),
-                      ),
-                    ],
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isWide = constraints.maxWidth > 600;
+                      return isWide
+                          ? Row(
+                              children: [
+                                Expanded(
+                                  child: CustomTextField(
+                                    controller: _insuranceProviderController,
+                                    label: 'Insurance Provider',
+                                    prefixIcon: Icons.health_and_safety,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: CustomTextField(
+                                    controller: _insuranceNumberController,
+                                    label: 'Insurance Number',
+                                    prefixIcon: Icons.confirmation_number,
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Column(
+                              children: [
+                                CustomTextField(
+                                  controller: _insuranceProviderController,
+                                  label: 'Insurance Provider',
+                                  prefixIcon: Icons.health_and_safety,
+                                ),
+                                const SizedBox(height: 16),
+                                CustomTextField(
+                                  controller: _insuranceNumberController,
+                                  label: 'Insurance Number',
+                                  prefixIcon: Icons.confirmation_number,
+                                ),
+                              ],
+                            );
+                    },
                   ),
                   const SizedBox(height: 16),
 
@@ -641,7 +855,7 @@ class _NewOrderFormState extends State<NewOrderForm> {
                   _isLoadingDoctors
                       ? const Center(child: CircularProgressIndicator())
                       : DropdownButtonFormField<Map<String, dynamic>>(
-                          value: _selectedDoctor,
+                          initialValue: _selectedDoctor,
                           decoration: const InputDecoration(
                             labelText: 'Referring Doctor (Optional)',
                             prefixIcon: Icon(Icons.medical_services),
@@ -659,7 +873,7 @@ class _NewOrderFormState extends State<NewOrderForm> {
                                   '${doctor['name']} ${doctor['specialty'] != null ? '(${doctor['specialty']})' : ''}',
                                 ),
                               );
-                            }).toList(),
+                            }),
                           ],
                           onChanged: (value) {
                             setState(() => _selectedDoctor = value);

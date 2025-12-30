@@ -58,7 +58,7 @@ const sendEmail = async (to, subject, text) => {
 
     const info = await transporter.sendMail(mailOptions);
 
-    console.log('📧 Email sent successfully:', info.messageId);
+    // console.log('📧 Email sent successfully:', info.messageId);
     return { success: true, messageId: info.messageId };
   } catch (error) {
     console.error('❌ Error sending email:', error);
@@ -92,7 +92,7 @@ const sendHtmlEmail = async (to, subject, html, text = '') => {
 
     const info = await transporter.sendMail(mailOptions);
 
-    console.log('📧 HTML Email sent successfully:', info.messageId);
+    // console.log('📧 HTML Email sent successfully:', info.messageId);
     return { success: true, messageId: info.messageId };
   } catch (error) {
     console.error('❌ Error sending HTML email:', error);
@@ -128,7 +128,7 @@ const sendEmailWithAttachments = async (to, subject, html, text = '', attachment
 
     const info = await transporter.sendMail(mailOptions);
 
-    console.log('📧 Email with attachments sent successfully:', info.messageId);
+    // console.log('📧 Email with attachments sent successfully:', info.messageId);
     return { success: true, messageId: info.messageId };
   } catch (error) {
     console.error('❌ Error sending email with attachments:', error);

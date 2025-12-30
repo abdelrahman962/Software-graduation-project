@@ -195,6 +195,19 @@ router.post('/invoices/:invoiceId/send-report',
   patientController.requestInvoiceReport
 );
 
+/**
+ * @route   GET /api/patient/invoices/:invoiceId/download
+ * @desc    Download invoice as PDF
+ * @access  Private (Patient)
+ */
+router.get('/invoices/:invoiceId/download', 
+  authMiddleware, 
+  roleMiddleware(['patient']), 
+  ...patientValidator.validateInvoiceId, 
+  validateRequest, 
+  patientController.downloadInvoicePDF
+);
+
 // ==================== LABS & TESTS & DOCTORS ROUTES ====================
 
 /**

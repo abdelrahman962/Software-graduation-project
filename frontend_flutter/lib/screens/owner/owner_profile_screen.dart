@@ -205,10 +205,12 @@ class _OwnerProfileScreenState extends State<OwnerProfileScreen> {
                             prefixIcon: Icons.account_circle,
                             enabled: _isEditing,
                             validator: (value) {
-                              if (value == null || value.isEmpty)
+                              if (value == null || value.isEmpty) {
                                 return 'Username is required';
-                              if (value.length < 3)
+                              }
+                              if (value.length < 3) {
                                 return 'Username must be at least 3 characters';
+                              }
                               if (!RegExp(r'^[a-z0-9._-]+$').hasMatch(value)) {
                                 return 'Username can only contain lowercase letters, numbers, dots, underscores, and hyphens';
                               }

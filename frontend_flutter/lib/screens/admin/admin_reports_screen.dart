@@ -3,11 +3,12 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import 'package:responsive_framework/responsive_framework.dart';
 import 'package:intl/intl.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/api_service.dart';
 import '../../config/theme.dart';
-import '../../widgets/admin_sidebar.dart';
-import 'package:flutter_animate/flutter_animate.dart';
+// import '../../widgets/admin_sidebar.dart';
+// import 'package:flutter_animate/flutter_animate.dart';
 
 class AdminReportsScreen extends StatefulWidget {
   const AdminReportsScreen({super.key});
@@ -24,14 +25,14 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   DateTime? _customStartDate;
   DateTime? _customEndDate;
   bool _isSidebarOpen = true;
-  int _selectedIndex = 2; // Reports index in sidebar
+  final int _selectedIndex = 6; // System Reports index in sidebar
 
   final List<Map<String, dynamic>> _reportTypes = [
     {
       'value': 'comprehensive',
       'label': 'Comprehensive Report',
       'icon': Icons.analytics,
-      'description': 'Complete platform overview with all metrics',
+      'description': 'Complete system overview with all metrics',
     },
     {
       'value': 'revenue',
@@ -50,12 +51,6 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       'label': 'Subscriptions Report',
       'icon': Icons.payment,
       'description': 'Subscription renewals and revenue forecast',
-    },
-    {
-      'value': 'platform',
-      'label': 'Platform Growth',
-      'icon': Icons.trending_up,
-      'description': 'Platform growth, registrations, and retention',
     },
   ];
 
@@ -102,7 +97,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
 
       if (mounted) {
         setState(() {
-          _reportData = response;
+          _reportData = response['report'];
           _isLoading = false;
         });
       }
@@ -153,62 +148,16 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         context.go('/login');
       });
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Center(child: CircularProgressIndicator());
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        elevation: 0,
-        leading: isMobile
-            ? Builder(
-                builder: (context) => IconButton(
-                  icon: const Icon(Icons.menu),
-                  onPressed: () => Scaffold.of(context).openDrawer(),
-                ),
-              )
-            : IconButton(
-                icon: AnimatedIcon(
-                  icon: AnimatedIcons.menu_close,
-                  progress: _isSidebarOpen
-                      ? const AlwaysStoppedAnimation(1.0)
-                      : const AlwaysStoppedAnimation(0.0),
-                ),
-                onPressed: _toggleSidebar,
-              ),
-        title: Text(
-          'System Reports',
-          style: Theme.of(
-            context,
-          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-        ),
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight:
+            MediaQuery.of(context).size.height -
+            100, // Leave space for dashboard app bar
       ),
-      drawer: isMobile
-          ? Drawer(
-              child: AdminSidebar(
-                selectedIndex: _selectedIndex,
-                onItemSelected: (index) {
-                  setState(() => _selectedIndex = index);
-                  Navigator.pop(context);
-                },
-              ),
-            )
-          : null,
-      body: Row(
-        children: [
-          if (!isMobile && _isSidebarOpen)
-            SizedBox(
-              width: 250,
-              child: AdminSidebar(
-                selectedIndex: _selectedIndex,
-                onItemSelected: (index) {
-                  setState(() => _selectedIndex = index);
-                },
-              ),
-            ),
-          Expanded(child: _buildReportsContent(context, isMobile)),
-        ],
-      ),
+      child: _buildReportsContent(context, isMobile),
     );
   }
 
@@ -290,7 +239,7 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                     Expanded(child: _buildCustomDateButton()),
                   ],
                   const SizedBox(width: 16),
-                  _buildGenerateButton(),
+                  SizedBox(width: 120, child: _buildGenerateButton()),
                 ],
               ),
           ],
@@ -384,32 +333,70 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
   }
 
   Widget _buildReportDisplay(BuildContext context, bool isMobile) {
-    final data = _reportData!['data'];
-    final period = _reportData!['period'];
+    final data = _reportData?['data'] as Map<String, dynamic>?;
+    final period = _reportData?['period'] as String?;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildReportHeader(context, period),
-        const SizedBox(height: 24),
-        if (_selectedReportType == 'comprehensive')
-          _buildComprehensiveReport(context, data, isMobile)
-        else if (_selectedReportType == 'revenue')
-          _buildRevenueReport(context, data, isMobile)
-        else if (_selectedReportType == 'labs')
-          _buildLabsReport(context, data, isMobile)
-        else if (_selectedReportType == 'subscriptions')
-          _buildSubscriptionsReport(context, data, isMobile)
-        else if (_selectedReportType == 'platform')
-          _buildPlatformGrowthReport(context, data, isMobile),
-      ],
-    ).animate().fadeIn(duration: 300.ms);
+    if (data == null) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(48.0),
+          child: Column(
+            children: [
+              Icon(Icons.error_outline, size: 64, color: Colors.red),
+              SizedBox(height: 16),
+              Text('Failed to load report data'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (period != null) _buildReportHeader(context, period),
+          const SizedBox(height: 24),
+          if (_selectedReportType == 'comprehensive')
+            _buildComprehensiveReport(context, data, isMobile)
+          else if (_selectedReportType == 'revenue')
+            _buildRevenueReport(context, data, isMobile)
+          else if (_selectedReportType == 'labs')
+            _buildLabsReport(context, data, isMobile)
+          else if (_selectedReportType == 'subscriptions')
+            _buildSubscriptionsReport(context, data, isMobile),
+        ],
+      ),
+    );
   }
 
-  Widget _buildReportHeader(BuildContext context, Map<String, dynamic> period) {
+  Widget _buildReportHeader(BuildContext context, String period) {
     final dateFormat = DateFormat('MMM dd, yyyy hh:mm a');
-    final startDate = DateTime.parse(period['start']);
-    final endDate = DateTime.parse(period['end']);
+    final now = DateTime.now();
+
+    // Calculate period text based on period
+    String periodText;
+
+    switch (period) {
+      case 'daily':
+        periodText = 'Today';
+        break;
+      case 'weekly':
+        periodText = 'This Week';
+        break;
+      case 'monthly':
+        periodText = 'This Month';
+        break;
+      case 'yearly':
+        periodText = 'This Year';
+        break;
+      case 'custom':
+        periodText = 'Custom Range';
+        break;
+      default:
+        periodText = 'Last 30 Days';
+    }
 
     return Card(
       color: AppTheme.primaryBlue.withOpacity(0.1),
@@ -431,12 +418,9 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
                     ),
                   ),
                   const SizedBox(height: 4),
+                  Text(periodText, style: const TextStyle(fontSize: 12)),
                   Text(
-                    '${DateFormat('MMM dd, yyyy').format(startDate)} - ${DateFormat('MMM dd, yyyy').format(endDate)}',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  Text(
-                    '${period['days']} days | Generated: ${dateFormat.format(DateTime.parse(_reportData!['generatedAt']))}',
+                    'Generated: ${dateFormat.format(now)}',
                     style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                   ),
                 ],
@@ -453,42 +437,19 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     Map<String, dynamic> data,
     bool isMobile,
   ) {
-    final overview = data['systemOverview'];
+    final platform = data['platform'] as Map<String, dynamic>? ?? {};
 
     return Column(
       children: [
-        _buildStatCard('Platform Overview', [
-          _buildStatItem(
-            'Monthly Revenue',
-            '\$${overview['currentMonthlyRevenue']}',
-            Icons.attach_money,
-            AppTheme.successGreen,
-          ),
-          _buildStatItem(
-            'Projected Yearly',
-            '\$${overview['projectedYearlyRevenue']}',
-            Icons.trending_up,
-            AppTheme.primaryBlue,
-          ),
-          _buildStatItem(
-            'Active Labs',
-            '${overview['activeLabs']}',
-            Icons.science,
-            AppTheme.secondaryTeal,
-          ),
-          _buildStatItem(
-            'Total Labs',
-            '${overview['totalLabs']}',
-            Icons.business,
-            AppTheme.accentOrange,
-          ),
-        ], isMobile),
+        _buildRevenueReport(context, data['revenue'] ?? {}, isMobile),
         const SizedBox(height: 16),
-        _buildRevenueReport(context, data['revenue'], isMobile),
+        _buildLabsReport(context, data['labs'] ?? {}, isMobile),
         const SizedBox(height: 16),
-        _buildLabsReport(context, data['labs'], isMobile),
-        const SizedBox(height: 16),
-        _buildSubscriptionsReport(context, data['subscriptions'], isMobile),
+        _buildSubscriptionsReport(
+          context,
+          data['subscriptions'] ?? {},
+          isMobile,
+        ),
       ],
     );
   }
@@ -498,78 +459,614 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     Map<String, dynamic> data,
     bool isMobile,
   ) {
-    final summary = data['summary'];
-    final revenueByTier = data['revenueByTier'] as List? ?? [];
-    final monthlyTrend = data['monthlyTrend'] as List? ?? [];
+    final monthlyRevenue = data['monthlyRevenue'] as List? ?? [];
+    final projectedRevenue = data['projectedRevenue'] as List? ?? [];
+    final averageRevenuePerLab = data['averageRevenuePerLab'] ?? 0;
+    final revenueGrowth = data['revenueGrowth'] ?? 0;
 
     return Column(
       children: [
-        _buildStatCard('Revenue Summary', [
+        _buildStatCard('Revenue Analysis', [
           _buildStatItem(
-            'Monthly Revenue',
-            '\$${summary['currentMonthlyRevenue']}',
+            'Average Revenue/Lab',
+            '\$$averageRevenuePerLab',
             Icons.account_balance,
             AppTheme.successGreen,
           ),
           _buildStatItem(
-            'Projected Yearly',
-            '\$${summary['projectedYearlyRevenue']}',
+            'Revenue Growth',
+            '$revenueGrowth%',
             Icons.trending_up,
+            revenueGrowth >= 0 ? AppTheme.successGreen : AppTheme.errorRed,
+          ),
+          _buildStatItem(
+            'Monthly Records',
+            '${monthlyRevenue.length}',
+            Icons.calendar_month,
             AppTheme.primaryBlue,
           ),
           _buildStatItem(
-            'New Subscriptions',
-            '\$${summary['newSubscriptionRevenue']}',
-            Icons.fiber_new,
+            'Projected Items',
+            '${projectedRevenue.length}',
+            Icons.schedule,
             AppTheme.secondaryTeal,
           ),
-          _buildStatItem(
-            'Active Paying Labs',
-            '${summary['activePayingLabs']}',
-            Icons.payment,
-            AppTheme.accentOrange,
-          ),
         ], isMobile),
-        const SizedBox(height: 16),
-        if (revenueByTier.isNotEmpty)
-          _buildTableCard(
-            'Revenue by Subscription Tier',
-            [
-              'Subscription Fee',
-              'Lab Count',
-              'Monthly Revenue',
-              'Yearly Revenue',
-            ],
-            revenueByTier
-                .map(
-                  (tier) => [
-                    '\$${tier['subscriptionFee'] ?? 0}',
-                    '${tier['labCount'] ?? 0}',
-                    '\$${tier['monthlyRevenue'] ?? '0.00'}',
-                    '\$${tier['yearlyRevenue'] ?? '0.00'}',
-                  ],
-                )
-                .cast<List<String>>()
-                .toList(),
-          ),
-        if (monthlyTrend.isNotEmpty) ...[
+        if (monthlyRevenue.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _buildRevenueChart(context, monthlyRevenue, isMobile),
+        ],
+        if (monthlyRevenue.isNotEmpty) ...[
           const SizedBox(height: 16),
           _buildTableCard(
-            'Revenue Trend',
-            ['Period', 'Revenue', 'New Labs'],
-            monthlyTrend
-                .map(
-                  (month) => [
-                    month['period'] ?? 'N/A',
-                    '\$${month['revenue'] ?? '0.00'}',
-                    '${month['newLabs'] ?? 0}',
-                  ],
-                )
-                .cast<List<String>>()
-                .toList(),
+            'Monthly Revenue Trend',
+            ['Year-Month', 'Revenue', 'Labs Count'],
+            monthlyRevenue.map((item) {
+              // Handle different _id formats
+              String yearMonth;
+              if (item['_id'] is Map) {
+                final id = item['_id'] as Map<String, dynamic>;
+                yearMonth =
+                    '${id['year']}-${id['month'].toString().padLeft(2, '0')}';
+              } else if (item['_id'] is String) {
+                // If _id is a string, use it directly or parse it
+                final idStr = item['_id'] as String;
+                if (idStr.contains('-')) {
+                  yearMonth = idStr;
+                } else {
+                  yearMonth = idStr;
+                }
+              } else {
+                yearMonth = 'Unknown';
+              }
+
+              return [
+                yearMonth,
+                '\$${item['revenue'] ?? 0}',
+                '${item['count'] ?? 0}',
+              ];
+            }).toList(),
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildRevenueChart(
+    BuildContext context,
+    List<dynamic> monthlyRevenue,
+    bool isMobile,
+  ) {
+    // Get responsive breakpoints
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final breakpoints = ResponsiveBreakpoints.of(context);
+
+    // Responsive sizing
+    final isTablet = breakpoints.isTablet;
+    final isLargeDesktop = screenWidth > 1400;
+
+    // Calculate responsive dimensions
+    double chartHeight;
+    double barWidth;
+    double fontSize;
+    double titleFontSize;
+    double reservedSizeBottom;
+    double reservedSizeLeft;
+
+    if (isMobile) {
+      chartHeight = screenHeight * 0.25;
+      barWidth = 16;
+      fontSize = 12;
+      titleFontSize = 14;
+      reservedSizeBottom = 30;
+      reservedSizeLeft = 50;
+    } else if (isTablet) {
+      chartHeight = screenHeight * 0.35;
+      barWidth = 20;
+      fontSize = 14;
+      titleFontSize = 16;
+      reservedSizeBottom = 35;
+      reservedSizeLeft = 65;
+    } else if (isLargeDesktop) {
+      chartHeight = screenHeight * 0.45;
+      barWidth = 32;
+      fontSize = 16;
+      titleFontSize = 18;
+      reservedSizeBottom = 45;
+      reservedSizeLeft = 85;
+    } else {
+      chartHeight = screenHeight * 0.4;
+      barWidth = 28;
+      fontSize = 15;
+      titleFontSize = 17;
+      reservedSizeBottom = 40;
+      reservedSizeLeft = 75;
+    }
+
+    // Prepare data for the chart
+    final spots = <FlSpot>[];
+    final labels = <String>[];
+
+    for (int i = 0; i < monthlyRevenue.length && i < 12; i++) {
+      final item = monthlyRevenue[i];
+      final revenue = (item['revenue'] ?? 0).toDouble();
+
+      // Handle different _id formats (could be string or object)
+      String label;
+      if (item['_id'] is Map) {
+        final id = item['_id'] as Map<String, dynamic>;
+        label = '${id['month']}/${id['year'].toString().substring(2)}';
+      } else if (item['_id'] is String) {
+        // If _id is a string, try to parse it
+        final idStr = item['_id'] as String;
+        if (idStr.contains('-')) {
+          final parts = idStr.split('-');
+          if (parts.length >= 2) {
+            label = '${parts[1]}/${parts[0].substring(2)}';
+          } else {
+            label = idStr;
+          }
+        } else {
+          label = idStr;
+        }
+      } else {
+        label = 'M${i + 1}';
+      }
+
+      spots.add(FlSpot(i.toDouble(), revenue));
+      labels.add(label);
+    }
+
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Revenue Trend Chart',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+                fontSize: titleFontSize,
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              height: chartHeight,
+              child: BarChart(
+                BarChartData(
+                  alignment: BarChartAlignment.spaceAround,
+                  maxY: spots.isNotEmpty
+                      ? spots.map((e) => e.y).reduce((a, b) => a > b ? a : b) *
+                            1.2
+                      : 100,
+                  barTouchData: BarTouchData(
+                    enabled: true,
+                    touchTooltipData: BarTouchTooltipData(
+                      tooltipBgColor: AppTheme.primaryBlue,
+                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                        return BarTooltipItem(
+                          '\$${rod.toY.toStringAsFixed(0)}',
+                          const TextStyle(color: Colors.white),
+                        );
+                      },
+                    ),
+                  ),
+                  titlesData: FlTitlesData(
+                    show: true,
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (value, meta) {
+                          final index = value.toInt();
+                          if (index >= 0 && index < labels.length) {
+                            return Text(
+                              labels[index],
+                              style: TextStyle(
+                                fontSize: fontSize,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            );
+                          }
+                          return const Text('');
+                        },
+                        reservedSize: reservedSizeBottom,
+                      ),
+                    ),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (value, meta) {
+                          return Text(
+                            '\$${value.toInt()}',
+                            style: TextStyle(
+                              fontSize: fontSize,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          );
+                        },
+                        reservedSize: reservedSizeLeft,
+                      ),
+                    ),
+                    topTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                  ),
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    horizontalInterval: spots.isNotEmpty
+                        ? spots
+                                  .map((e) => e.y)
+                                  .reduce((a, b) => a > b ? a : b) /
+                              5
+                        : 20,
+                  ),
+                  borderData: FlBorderData(show: false),
+                  barGroups: spots.asMap().entries.map((entry) {
+                    return BarChartGroupData(
+                      x: entry.key,
+                      barRods: [
+                        BarChartRodData(
+                          toY: entry.value.y,
+                          color: AppTheme.successGreen,
+                          width: barWidth,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLabsStatusChart(
+    BuildContext context,
+    List<dynamic> labsByStatus,
+    bool isMobile,
+  ) {
+    // Get responsive breakpoints
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final breakpoints = ResponsiveBreakpoints.of(context);
+
+    // Responsive sizing
+    final isTablet = breakpoints.isTablet;
+    final isLargeDesktop = screenWidth > 1400;
+
+    // Calculate responsive dimensions
+    double chartHeight;
+    double radius;
+    double titleFontSize;
+    double legendFontSize;
+    double centerSpaceRadius;
+
+    if (isMobile) {
+      chartHeight = screenHeight * 0.22;
+      radius = screenWidth * 0.12;
+      titleFontSize = screenWidth * 0.035;
+      legendFontSize = 13;
+      centerSpaceRadius = 35;
+    } else if (isTablet) {
+      chartHeight = screenHeight * 0.30;
+      radius = screenWidth * 0.09;
+      titleFontSize = screenWidth * 0.028;
+      legendFontSize = 15;
+      centerSpaceRadius = 40;
+    } else if (isLargeDesktop) {
+      chartHeight =
+          screenHeight * 0.30; // Further reduced for better containment
+      radius = 100; // Reduced radius for smaller chart
+      titleFontSize = 18; // Slightly smaller title
+      legendFontSize = 16;
+      centerSpaceRadius = 45;
+    } else {
+      chartHeight = screenHeight * 0.35;
+      radius = screenWidth * 0.08;
+      titleFontSize = screenWidth * 0.025;
+      legendFontSize = 16;
+      centerSpaceRadius = 45;
+    }
+
+    final colors = [
+      AppTheme.successGreen,
+      AppTheme.errorRed,
+      AppTheme.secondaryTeal,
+      AppTheme.accentOrange,
+      AppTheme.primaryBlue,
+    ];
+
+    // Calculate total for percentages
+    final total = labsByStatus.fold<double>(
+      0,
+      (sum, item) => sum + ((item['count'] ?? 0) as num).toDouble(),
+    );
+
+    final sections = <PieChartSectionData>[];
+    for (int i = 0; i < labsByStatus.length && i < colors.length; i++) {
+      final item = labsByStatus[i];
+      final count = (item['count'] ?? 0).toDouble();
+      final status = item['_id'] ?? 'Unknown';
+      final percentage = total > 0 ? (count / total * 100).round() : 0;
+
+      sections.add(
+        PieChartSectionData(
+          color: colors[i],
+          value: count,
+          title: '${count.toInt()}\n$percentage%',
+          radius: radius,
+          titleStyle: TextStyle(
+            fontSize: titleFontSize * 0.8,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+            height: 1.2,
+          ),
+          badgeWidget: Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: colors[i],
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: colors[i].withValues(alpha: 0.3),
+                  blurRadius: 4,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+          ),
+          badgePositionPercentageOffset: 0.9,
+        ),
+      );
+    }
+
+    return Card(
+      elevation: 4,
+      shadowColor: AppTheme.primaryBlue.withValues(alpha: 0.2),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            colors: [
+              Colors.white,
+              AppTheme.primaryBlue.withValues(alpha: 0.02),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.all(isLargeDesktop ? 32.0 : 20.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Enhanced Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.secondaryTeal.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppTheme.secondaryTeal.withValues(alpha: 0.2),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.science,
+                      color: AppTheme.secondaryTeal,
+                      size: isLargeDesktop ? 24 : 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Labs by Status Distribution',
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                fontSize: isLargeDesktop
+                                    ? 22
+                                    : (isMobile ? 16 : 18),
+                                color: AppTheme.primaryBlue,
+                              ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Current status breakdown of all laboratories',
+                          style: TextStyle(
+                            fontSize: isLargeDesktop ? 14 : 12,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Enhanced Chart Section
+                  Expanded(
+                    flex: isLargeDesktop
+                        ? 2
+                        : 2, // Reduced flex for chart on large desktop
+                    child: Container(
+                      height: chartHeight,
+                      margin: EdgeInsets.all(
+                        isLargeDesktop ? 16 : 8,
+                      ), // Increased margin for large screens
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: EdgeInsets.all(
+                            isLargeDesktop ? 20 : 12,
+                          ), // Increased padding for large screens
+                          child: PieChart(
+                            PieChartData(
+                              sections: sections,
+                              sectionsSpace: 3,
+                              centerSpaceRadius: centerSpaceRadius,
+                              centerSpaceColor: Colors.white,
+                              borderData: FlBorderData(show: false),
+                              pieTouchData: PieTouchData(
+                                touchCallback:
+                                    (FlTouchEvent event, pieTouchResponse) {
+                                      // Add touch feedback if needed
+                                    },
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: isLargeDesktop ? 40 : (isTablet ? 28 : 24)),
+                  // Enhanced Legend Section
+                  Expanded(
+                    flex: isLargeDesktop
+                        ? 3
+                        : 1, // Increased flex for legend on large desktop
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: const Color(0xFFE0E0E0),
+                          width: 1,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Status Breakdown',
+                            style: TextStyle(
+                              fontSize: isLargeDesktop ? 16 : 14,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primaryBlue,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          ...labsByStatus.asMap().entries.map((entry) {
+                            final index = entry.key;
+                            final item = entry.value;
+                            final status = item['_id'] ?? 'Unknown';
+                            final count = item['count'] ?? 0;
+                            final percentage = total > 0
+                                ? (count / total * 100).round()
+                                : 0;
+
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color:
+                                      (index < colors.length
+                                              ? colors[index]
+                                              : Colors.grey)
+                                          .withValues(alpha: 0.2),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: isLargeDesktop ? 18 : 14,
+                                    height: isLargeDesktop ? 18 : 14,
+                                    decoration: BoxDecoration(
+                                      color: index < colors.length
+                                          ? colors[index]
+                                          : Colors.grey,
+                                      borderRadius: BorderRadius.circular(3),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color:
+                                              (index < colors.length
+                                                      ? colors[index]
+                                                      : Colors.grey)
+                                                  .withValues(alpha: 0.3),
+                                          blurRadius: 3,
+                                          offset: const Offset(0, 1),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          status,
+                                          style: TextStyle(
+                                            fontSize: legendFontSize,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey[800],
+                                          ),
+                                        ),
+                                        Text(
+                                          '$count labs ($percentage%)',
+                                          style: TextStyle(
+                                            fontSize: legendFontSize * 0.85,
+                                            color: Colors.grey[600],
+                                            fontWeight: FontWeight.w400,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -578,129 +1075,42 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     Map<String, dynamic> data,
     bool isMobile,
   ) {
-    final summary = data['summary'];
+    final totalLabs = data['totalLabs'] ?? 0;
+    final activeLabs = data['activeLabs'] ?? 0;
+    final inactiveLabs = data['inactiveLabs'] ?? 0;
+    final labsByStatus = data['labsByStatus'] as List? ?? [];
+    final labsBySubscriptionTier =
+        data['labsBySubscriptionTier'] as List? ?? [];
+    final labsByLocation = data['labsByLocation'] as List? ?? [];
 
     return Column(
       children: [
-        _buildStatCard('Labs Summary', [
+        _buildStatCard('Lab Statistics', [
           _buildStatItem(
             'Total Labs',
-            '${summary['totalLabs']}',
-            Icons.science,
+            '$totalLabs',
+            Icons.business,
             AppTheme.primaryBlue,
           ),
           _buildStatItem(
             'Active Labs',
-            '${summary['activeLabs']}',
+            '$activeLabs',
             Icons.check_circle,
             AppTheme.successGreen,
           ),
           _buildStatItem(
             'Inactive Labs',
-            '${summary['inactiveLabs']}',
+            '$inactiveLabs',
             Icons.cancel,
             AppTheme.errorRed,
           ),
           _buildStatItem(
-            'New Labs',
-            '${summary['newLabsInPeriod']}',
-            Icons.fiber_new,
-            AppTheme.accentOrange,
-          ),
-        ], isMobile),
-        const SizedBox(height: 16),
-        _buildStatCard('Subscription Status', [
-          _buildStatItem(
-            'Active Subscriptions',
-            '${summary['activeSubscriptions']}',
-            Icons.verified,
-            AppTheme.successGreen,
-          ),
-          _buildStatItem(
-            'Expiring Soon',
-            '${summary['expiringSoon']}',
-            Icons.warning,
-            AppTheme.accentOrange,
-          ),
-          _buildStatItem(
-            'Expired',
-            '${summary['expired']}',
-            Icons.error,
-            AppTheme.errorRed,
-          ),
-          _buildStatItem(
-            'Growth Rate',
-            '${summary['growthRate']}',
-            Icons.trending_up,
+            'Active Rate',
+            '${totalLabs > 0 ? ((activeLabs / totalLabs) * 100).round() : 0}%',
+            Icons.percent,
             AppTheme.secondaryTeal,
           ),
         ], isMobile),
-      ],
-    );
-  }
-
-  Widget _buildPlatformGrowthReport(
-    BuildContext context,
-    Map<String, dynamic> data,
-    bool isMobile,
-  ) {
-    final summary = data['summary'];
-    final registrationTrend = data['registrationTrend'] as List? ?? [];
-
-    return Column(
-      children: [
-        _buildStatCard('Platform Growth', [
-          _buildStatItem(
-            'Total Applications',
-            '${summary['totalApplications']}',
-            Icons.app_registration,
-            AppTheme.primaryBlue,
-          ),
-          _buildStatItem(
-            'Approved',
-            '${summary['approved']}',
-            Icons.check_circle,
-            AppTheme.successGreen,
-          ),
-          _buildStatItem(
-            'Rejected',
-            '${summary['rejected']}',
-            Icons.cancel,
-            AppTheme.errorRed,
-          ),
-          _buildStatItem(
-            'Pending',
-            '${summary['pending']}',
-            Icons.pending,
-            AppTheme.accentOrange,
-          ),
-        ], isMobile),
-        const SizedBox(height: 16),
-        _buildStatCard('Performance Metrics', [
-          _buildStatItem(
-            'Approval Rate',
-            '${summary['approvalRate']}',
-            Icons.verified,
-            AppTheme.successGreen,
-          ),
-          _buildStatItem(
-            'Retention Rate',
-            '${summary['retentionRate']}',
-            Icons.people,
-            AppTheme.secondaryTeal,
-          ),
-        ], isMobile),
-        if (registrationTrend.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          _buildTableCard(
-            'Registration Trend',
-            ['Date', 'New Labs'],
-            registrationTrend
-                .map((day) => [day['date'] ?? 'N/A', '${day['newLabs'] ?? 0}'])
-                .cast<List<String>>()
-                .toList(),
-          ),
-        ],
       ],
     );
   }
@@ -710,77 +1120,38 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     Map<String, dynamic> data,
     bool isMobile,
   ) {
-    final summary = data['summary'];
-    final renewals = data['upcomingRenewals'] as List;
+    final totalSubscriptions = data['totalSubscriptions'] ?? 0;
+    final activeSubscriptions = data['activeSubscriptions'] ?? 0;
+    final expiredSubscriptions = data['expiredSubscriptions'] ?? 0;
 
     return Column(
       children: [
-        _buildStatCard('Subscription Summary', [
+        _buildStatCard('Subscription Statistics', [
           _buildStatItem(
             'Total Subscriptions',
-            '${summary['totalSubscriptions']}',
+            '$totalSubscriptions',
             Icons.payment,
             AppTheme.primaryBlue,
           ),
           _buildStatItem(
             'Active',
-            '${summary['activeSubscriptions']}',
+            '$activeSubscriptions',
             Icons.check_circle,
             AppTheme.successGreen,
           ),
           _buildStatItem(
             'Expired',
-            '${summary['expiredSubscriptions']}',
+            '$expiredSubscriptions',
             Icons.cancel,
             AppTheme.errorRed,
           ),
           _buildStatItem(
-            'New This Period',
-            '${summary['newSubscriptionsInPeriod']}',
-            Icons.fiber_new,
-            AppTheme.accentOrange,
-          ),
-        ], isMobile),
-        const SizedBox(height: 16),
-        _buildStatCard('Renewal Forecast', [
-          _buildStatItem(
-            'Expiring in 7 Days',
-            '${summary['expiringSoon']}',
-            Icons.warning,
-            AppTheme.accentOrange,
-          ),
-          _buildStatItem(
-            'Expiring in 30 Days',
-            '${summary['expiringThisMonth']}',
-            Icons.event,
+            'Active Rate',
+            '${totalSubscriptions > 0 ? ((activeSubscriptions / totalSubscriptions) * 100).round() : 0}%',
+            Icons.percent,
             AppTheme.secondaryTeal,
           ),
-          _buildStatItem(
-            'Projected Monthly Revenue',
-            '\$${summary['projectedMonthlyRevenue']}',
-            Icons.trending_up,
-            AppTheme.successGreen,
-          ),
         ], isMobile),
-        const SizedBox(height: 16),
-        if (renewals.isNotEmpty)
-          _buildTableCard(
-            'Upcoming Renewals (Next 30 Days)',
-            ['Lab Name', 'Expires', 'Days Left', 'Fee'],
-            renewals
-                .map(
-                  (renewal) => [
-                    renewal['labName'] ?? 'N/A',
-                    DateFormat(
-                      'MMM dd, yyyy',
-                    ).format(DateTime.parse(renewal['expiryDate'])),
-                    '${renewal['daysRemaining']} days',
-                    '\$${(renewal['subscriptionFee'] ?? 0).toStringAsFixed(2)}',
-                  ],
-                )
-                .cast<List<String>>()
-                .toList(),
-          ),
       ],
     );
   }
@@ -801,12 +1172,12 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
             ),
             const SizedBox(height: 16),
             GridView.count(
-              shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
+              shrinkWrap: true,
               crossAxisCount: isMobile ? 2 : 4,
               crossAxisSpacing: 16,
               mainAxisSpacing: 16,
-              childAspectRatio: isMobile ? 1.5 : 2,
+              childAspectRatio: isMobile ? 1.0 : 1.3,
               children: stats,
             ),
           ],
@@ -821,37 +1192,73 @@ class _AdminReportsScreenState extends State<AdminReportsScreen> {
     IconData icon,
     Color color,
   ) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: color, size: 28),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
-            textAlign: TextAlign.center,
+    return Builder(
+      builder: (context) {
+        final screenWidth = MediaQuery.of(context).size.width;
+        final isMobile = ResponsiveBreakpoints.of(context).isMobile;
+
+        // Responsive calculations based on screen size
+        final iconSize = isMobile
+            ? 24.0
+            : (screenWidth * 0.015).clamp(20.0, 32.0);
+        final valueFontSize = isMobile
+            ? 16.0
+            : (screenWidth * 0.012).clamp(14.0, 18.0);
+        final labelFontSize = isMobile
+            ? 10.0
+            : (screenWidth * 0.008).clamp(9.0, 11.0);
+        final padding = isMobile
+            ? 8.0
+            : (screenWidth * 0.006).clamp(10.0, 16.0);
+        final spacing = isMobile ? 6.0 : (screenWidth * 0.004).clamp(6.0, 10.0);
+
+        return Container(
+          padding: EdgeInsets.all(padding),
+          constraints: BoxConstraints(
+            minHeight: isMobile ? 80 : 100,
+            maxHeight: isMobile ? 120 : 150,
           ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(fontSize: 11, color: Colors.grey[700]),
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withOpacity(0.3)),
           ),
-        ],
-      ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: color, size: iconSize),
+              SizedBox(height: spacing),
+              Flexible(
+                child: Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: valueFontSize,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              SizedBox(height: spacing * 0.5),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: labelFontSize,
+                    color: Colors.grey[700],
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

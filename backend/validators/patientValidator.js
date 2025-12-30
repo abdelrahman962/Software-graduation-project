@@ -18,10 +18,6 @@ exports.validateRequestTests = [
     .trim()
     .isMongoId().withMessage('Invalid doctor ID format'),
   
-  body('is_urgent')
-    .optional()
-    .isBoolean().withMessage('is_urgent must be true or false'),
-  
   body('remarks')
     .optional()
     .trim()

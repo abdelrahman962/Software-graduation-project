@@ -39,9 +39,9 @@ class ApiService {
   ) async {
     final url = Uri.parse('${ApiConfig.baseUrl}$endpoint');
 
-    print('🔍 HTTP DEBUG: POST $url');
-    print('🔍 HTTP DEBUG: Headers: ${_getHeaders()}');
-    print('🔍 HTTP DEBUG: Body: $body');
+    // print('🔍 HTTP DEBUG: POST $url');
+    // print('🔍 HTTP DEBUG: Headers: ${_getHeaders()}');
+    // print('🔍 HTTP DEBUG: Body: $body');
 
     final response = await http
         .post(url, headers: _getHeaders(), body: jsonEncode(body))
@@ -52,8 +52,8 @@ class ApiService {
           },
         );
 
-    print('🔍 HTTP DEBUG: Response status: ${response.statusCode}');
-    print('🔍 HTTP DEBUG: Response body: ${response.body}');
+    // print('🔍 HTTP DEBUG: Response status: ${response.statusCode}');
+    // print('🔍 HTTP DEBUG: Response body: ${response.body}');
 
     return _handleResponse(response);
   }

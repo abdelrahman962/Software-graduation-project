@@ -95,9 +95,9 @@ class StaffApiService {
     String? startDate,
     String? endDate,
   }) async {
-    print(
-      '🔍 DEBUG: API getAllLabOrders called with status: $status, patientId: $patientId, startDate: $startDate, endDate: $endDate',
-    );
+    // print(
+    //   '🔍 DEBUG: API getAllLabOrders called with status: $status, patientId: $patientId, startDate: $startDate, endDate: $endDate',
+    // );
     var url = '/staff/orders';
     final params = <String>[];
 
@@ -110,9 +110,9 @@ class StaffApiService {
       url += '?${params.join('&')}';
     }
 
-    print('🔍 DEBUG: API getAllLabOrders - final URL: $url');
+    // print('🔍 DEBUG: API getAllLabOrders - final URL: $url');
     final result = await ApiService.get(url);
-    print('🔍 DEBUG: API getAllLabOrders - result: $result');
+    // print('🔍 DEBUG: API getAllLabOrders - result: $result');
     return result;
   }
 
@@ -141,11 +141,11 @@ class StaffApiService {
     List<Map<String, dynamic>>? components,
     String? remarks,
   }) async {
-    print('🔍 API SERVICE DEBUG: uploadResult called with:');
-    print('🔍 API SERVICE DEBUG: detailId: $detailId');
-    print('🔍 API SERVICE DEBUG: resultValue: $resultValue');
-    print('🔍 API SERVICE DEBUG: components: $components');
-    print('🔍 API SERVICE DEBUG: remarks: $remarks');
+    // print('🔍 API SERVICE DEBUG: uploadResult called with:');
+    // print('🔍 API SERVICE DEBUG: detailId: $detailId');
+    // print('🔍 API SERVICE DEBUG: resultValue: $resultValue');
+    // print('🔍 API SERVICE DEBUG: components: $components');
+    // print('🔍 API SERVICE DEBUG: remarks: $remarks');
 
     final requestData = {
       'detail_id': detailId,
@@ -154,7 +154,7 @@ class StaffApiService {
       if (remarks != null) 'remarks': remarks,
     };
 
-    print('🔍 API SERVICE DEBUG: Sending request data: $requestData');
+    // print('🔍 API SERVICE DEBUG: Sending request data: $requestData');
 
     return await ApiService.post('/staff/upload-result', requestData);
   }
@@ -164,9 +164,24 @@ class StaffApiService {
     return await ApiService.get('/staff/tests/$testId/components');
   }
 
+  // Run HL7 simulation for automated result generation
+  static Future<Map<String, dynamic>> runTest({
+    required String detailId,
+    String priority = 'normal',
+  }) async {
+    // print('🌐 FRONTEND API: Calling runTest endpoint');
+    // print('📨 FRONTEND API: detailId = $detailId, priority = $priority');
+    return await ApiService.post('/staff/run-test', {
+      'detail_id': detailId,
+      'priority': priority,
+    });
+  }
+
   // Notifications
-  static Future<Map<String, dynamic>> getNotifications(String staffId) async {
-    return await ApiService.get('/staff/notifications/$staffId');
+  static Future<List<dynamic>> getNotifications(String staffId) async {
+    final response = await ApiService.get('/staff/notifications/$staffId');
+    // The backend returns the notifications array directly
+    return response as List<dynamic>;
   }
 
   // Inventory
@@ -306,7 +321,7 @@ class StaffApiService {
   static Future<Map<String, dynamic>> getOrderResultsReport(
     String orderId,
   ) async {
-    print('🔍 DEBUG: API call - getOrderResultsReport for orderId: $orderId');
+    // print('🔍 DEBUG: API call - getOrderResultsReport for orderId: $orderId');
     return await ApiService.get('/staff/orders/$orderId/results');
   }
 
@@ -314,7 +329,7 @@ class StaffApiService {
   static Future<Map<String, dynamic>> getInvoiceDetails(
     String invoiceId,
   ) async {
-    print('🔍 DEBUG: API call - getInvoiceDetails for invoiceId: $invoiceId');
+    // print('🔍 DEBUG: API call - getInvoiceDetails for invoiceId: $invoiceId');
     return await ApiService.get('/staff/invoices/$invoiceId/details');
   }
 
@@ -322,7 +337,7 @@ class StaffApiService {
   static Future<Map<String, dynamic>> getInvoiceByOrderId(
     String orderId,
   ) async {
-    print('🔍 DEBUG: API call - getInvoiceByOrderId for orderId: $orderId');
+    // print('🔍 DEBUG: API call - getInvoiceByOrderId for orderId: $orderId');
     return await ApiService.get('/staff/orders/$orderId/invoice');
   }
 

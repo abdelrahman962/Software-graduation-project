@@ -99,6 +99,8 @@ class _OwnerRegistrationScreenState extends State<OwnerRegistrationScreen> {
               '${_cityController.text.trim()}, ${_streetController.text.trim()}, ${_buildingController.text.trim()}',
           email: _emailController.text.trim(),
           selectedPlan: _selectedPlan!, // Use selected plan
+          labName: _labNameController.text.trim(),
+          labLicenseNumber: _labLicenseController.text.trim(),
         );
 
         if (mounted) {
@@ -144,7 +146,8 @@ class _OwnerRegistrationScreenState extends State<OwnerRegistrationScreen> {
                 TextButton(
                   onPressed: () {
                     Navigator.of(context).pop(); // Close dialog
-                    Navigator.of(context).pop(); // Go back to previous screen
+                    // Use GoRouter to navigate to home instead of popping
+                    context.go('/'); // Navigate to home page
                   },
                   child: const Text('Close'),
                 ),
@@ -154,10 +157,46 @@ class _OwnerRegistrationScreenState extends State<OwnerRegistrationScreen> {
         }
       } catch (error) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Registration failed: ${error.toString()}'),
-              backgroundColor: Colors.red,
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.error, color: Colors.red, size: 32),
+                  SizedBox(width: 12),
+                  Text('Registration Failed'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    (() {
+                      final errorMessage = error.toString();
+                      if (errorMessage.contains('Registration failed:')) {
+                        return errorMessage.replaceAll(
+                          'Registration failed: ',
+                          '',
+                        );
+                      }
+                      return 'Registration failed: $errorMessage';
+                    })(),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Please check your information and try again. If the problem persists, contact our support team.',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
             ),
           );
         }

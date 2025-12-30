@@ -53,9 +53,9 @@ async function sendNotification(options) {
       );
       results.whatsapp.success = whatsappSuccess;
       if (whatsappSuccess) {
-        console.log('✅ WhatsApp notification sent successfully');
+        // console.log('✅ WhatsApp notification sent successfully');
       } else {
-        console.log('❌ WhatsApp notification failed');
+        // console.log('❌ WhatsApp notification failed');
         results.whatsapp.error = 'WhatsApp sending failed';
       }
     } catch (error) {
@@ -64,8 +64,8 @@ async function sendNotification(options) {
     }
   }
 
-  // Send Email (unless whatsappOnly is true)
-  if (!whatsappOnly && email && emailSubject && emailHtml) {
+  // Send Email (always if email details are provided)
+  if (email && emailSubject && emailHtml) {
     try {
       let emailResult;
       if (attachments && attachments.length > 0) {
@@ -86,9 +86,9 @@ async function sendNotification(options) {
       }
       results.email.success = emailResult.success;
       if (emailResult.success) {
-        console.log('✅ Email notification sent successfully');
+        // console.log('✅ Email notification sent successfully');
       } else {
-        console.log('❌ Email notification failed');
+        // console.log('❌ Email notification failed');
         results.email.error = 'Email sending failed';
       }
     } catch (error) {
@@ -100,7 +100,7 @@ async function sendNotification(options) {
   // Log overall result
   const whatsappStatus = results.whatsapp.success ? '✅' : '❌';
   const emailStatus = results.email.success ? '✅' : '❌';
-  console.log(`📤 Notification sent - WhatsApp: ${whatsappStatus}, Email: ${emailStatus}`);
+  // console.log(`📤 Notification sent - WhatsApp: ${whatsappStatus}, Email: ${emailStatus}`);
 
   return results;
 }
@@ -110,7 +110,6 @@ async function sendNotification(options) {
  * @param {Object} patient - Patient object with phone_number, email, full_name
  * @param {Object} test - Test object with test_name
  * @param {string} resultUrl - URL to view results
- * @param {boolean} isUrgent - Whether results are urgent
  * @param {string} labName - Lab name
  * @param {string} barcode - Order barcode/ID
  * @param {boolean} isAbnormal - Whether results are abnormal
@@ -120,7 +119,7 @@ async function sendNotification(options) {
  * @param {Object} detail - Order detail object (for PDF generation)
  * @returns {Promise<Object>} - Result object
  */
-async function sendLabReport(patient, test, resultUrl, isUrgent, labName, barcode, isAbnormal = false, abnormalCount = 0, order = null, result = null, detail = null) {
+async function sendLabReport(patient, test, resultUrl, labName, barcode, isAbnormal = false, abnormalCount = 0, order = null, result = null, detail = null) {
   const patientName = `${patient.full_name?.first || ''} ${patient.full_name?.last || ''}`.trim();
   const patientPhone = patient.phone_number;
   const patientEmail = patient.email;
@@ -133,10 +132,6 @@ async function sendLabReport(patient, test, resultUrl, isUrgent, labName, barcod
     urgencyIndicator = '🚨 CRITICAL: ';
     urgencyMessage = `\n\n⚠️ **IMPORTANT:** ${abnormalCount} abnormal value(s) detected. Please contact your doctor immediately for interpretation.`;
     emailAlertClass = 'alert-critical';
-  } else if (isUrgent) {
-    urgencyIndicator = '⚠️ URGENT: ';
-    urgencyMessage = '\n\n⚠️ This result requires immediate attention from your healthcare provider.';
-    emailAlertClass = 'alert-urgent';
   }
 
   const whatsappMessage = `${urgencyIndicator}Your test result for ${test.test_name} is now available.\n\nHello ${patientName},\n\n✅ Your test result for *${test.test_name}* is now available.\n\n🔗 View your result: ${resultUrl}\n\n🏥 Lab: ${labName}\n📋 Order: ${barcode}${urgencyMessage}\n\nBest regards,\nMedical Laboratory Team`;
@@ -146,7 +141,6 @@ async function sendLabReport(patient, test, resultUrl, isUrgent, labName, barcod
   const emailHtml = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       ${isAbnormal ? '<div style="background-color: #ffebee; border: 2px solid #f44336; border-radius: 8px; padding: 15px; margin-bottom: 20px;"><h3 style="color: #d32f2f; margin: 0;">🚨 CRITICAL: Abnormal Test Results</h3><p style="margin: 10px 0 0 0; color: #d32f2f;">${abnormalCount} abnormal value(s) detected. Please contact your doctor immediately.</p></div>' : ''}
-      ${isUrgent && !isAbnormal ? '<div style="background-color: #fff3e0; border: 2px solid #ff9800; border-radius: 8px; padding: 15px; margin-bottom: 20px;"><h3 style="color: #f57c00; margin: 0;">⚠️ Urgent Results</h3><p style="margin: 10px 0 0 0; color: #f57c00;">This result requires immediate attention from your healthcare provider.</p></div>' : ''}
 
       <h2 style="color: #4A90E2;">Test Result Available</h2>
       <p>Hello ${patientName},</p>
@@ -217,7 +211,7 @@ async function sendLabReport(patient, test, resultUrl, isUrgent, labName, barcod
         contentType: 'application/pdf'
       });
 
-      console.log('✅ PDF report generated for email attachment');
+      // console.log('✅ PDF report generated for email attachment');
     } catch (pdfError) {
       console.error('❌ Failed to generate PDF:', pdfError);
       // Continue without PDF - don't fail the notification
@@ -326,7 +320,7 @@ async function sendInvoiceReport(patient, invoice, invoiceUrl, labName) {
       contentType: 'application/pdf'
     });
 
-    console.log('✅ PDF invoice generated for email attachment');
+    // console.log('✅ PDF invoice generated for email attachment');
   } catch (pdfError) {
     console.error('❌ Failed to generate invoice PDF:', pdfError);
     // Continue without PDF - don't fail the notification

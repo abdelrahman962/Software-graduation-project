@@ -83,7 +83,7 @@ exports.validateUpdateSampleStatus = [
   body('status')
     .trim()
     .notEmpty().withMessage('Status is required')
-    .isIn(['pending', 'urgent', 'collected', 'in_progress', 'completed'])
+    .isIn(['pending', 'collected', 'in_progress', 'completed'])
     .withMessage('Invalid status value')
 ];
 

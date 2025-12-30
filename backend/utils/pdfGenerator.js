@@ -666,7 +666,7 @@ function cleanupPDFFile(filePath) {
   try {
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
-      console.log(`Cleaned up PDF file: ${filePath}`);
+      // console.log(`Cleaned up PDF file: ${filePath}`);
     }
   } catch (error) {
     console.error(`Error cleaning up PDF file ${filePath}:`, error);

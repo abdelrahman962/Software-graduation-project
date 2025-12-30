@@ -69,6 +69,15 @@ router.post("/upload-result",
   staffController.uploadResult
 );
 
+router.post("/run-test", 
+  authMiddleware, 
+  roleMiddleware(['Staff']), 
+  staffController.runTest
+);
+
+// Temporary test route without auth
+router.post("/test-run-test", staffController.runTest);
+
 router.get("/tests/:testId/components",
   authMiddleware,
   roleMiddleware(['Staff']),

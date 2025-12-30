@@ -123,7 +123,7 @@ exports.requestTestForPatient = async (req, res) => {
   session.startTransaction();
   
   try {
-    const { patient_id, owner_id, test_ids, remarks, is_urgent } = req.body;
+    const { patient_id, owner_id, test_ids, remarks } = req.body;
     const doctor_id = req.user.id;
 
     // Validate input
@@ -176,7 +176,7 @@ exports.requestTestForPatient = async (req, res) => {
       doctor_id: doctor_id,
       order_date: new Date(),
       status: 'processing',
-      remarks: is_urgent ? 'urgent' : remarks,
+      remarks: remarks,
       owner_id,
       is_patient_registered: true
     }], { session });
@@ -185,7 +185,7 @@ exports.requestTestForPatient = async (req, res) => {
     const orderDetails = test_ids.map(test_id => ({
       order_id: newOrder[0]._id,
       test_id,
-      status: is_urgent ? 'urgent' : 'pending',
+      status: 'pending',
       sample_collected: false
     }));
 
@@ -232,7 +232,7 @@ exports.requestTestForPatient = async (req, res) => {
       receiver_model: 'Patient',
       type: 'test_result',
       title: 'Test Ordered by Doctor',
-      message: `Dr. ${req.user.username || 'Your doctor'} has ordered ${test_ids.length} test(s) for you.${is_urgent ? ' (URGENT)' : ''} Please visit ${lab.lab_name} for sample collection.`
+      message: `Dr. ${req.user.username || 'Your doctor'} has ordered ${test_ids.length} test(s) for you. Please visit ${lab.lab_name} for sample collection.`
     }], { session });
 
     // Send notification to lab owner
@@ -242,27 +242,9 @@ exports.requestTestForPatient = async (req, res) => {
       receiver_id: owner_id,
       receiver_model: 'Owner',
       type: 'request',
-      title: is_urgent ? 'Urgent Test Request from Doctor' : 'New Test Request from Doctor',
-      message: `Doctor has requested ${test_ids.length} test(s) for patient ${patient.full_name.first} ${patient.full_name.last}.${is_urgent ? ' - URGENT PROCESSING REQUIRED' : ''}`
+      title: 'New Test Request from Doctor',
+      message: `Doctor has requested ${test_ids.length} test(s) for patient ${patient.full_name.first} ${patient.full_name.last}.`
     }], { session });
-
-    // If urgent, notify all staff at the lab
-    if (is_urgent) {
-      const Staff = require('../models/Staff');
-      const labStaff = await Staff.find({ owner_id }).session(session);
-      
-      const staffNotifications = labStaff.map(staff => ({
-        sender_id: doctor_id,
-        sender_model: 'Doctor',
-        receiver_id: staff._id,
-        receiver_model: 'Staff',
-        type: 'request',
-        title: '🚨 URGENT Test Request',
-        message: `Urgent test order from doctor for patient ${patient.full_name.first} ${patient.full_name.last}.`
-      }));
-
-      await Notification.insertMany(staffNotifications, { session });
-    }
 
     // Commit transaction
     await session.commitTransaction();
@@ -272,7 +254,7 @@ exports.requestTestForPatient = async (req, res) => {
     const emailMessage = `
 Hello ${patient.full_name.first},
 
-Dr. ${req.user.username || 'Your doctor'} has ordered ${test_ids.length} test(s) for you${is_urgent ? ' (URGENT)' : ''}.
+Dr. ${req.user.username || 'Your doctor'} has ordered ${test_ids.length} test(s) for you.
 
 Lab: ${lab.lab_name}
 Tests: ${tests.map(t => t.test_name).join(', ')}
@@ -284,8 +266,6 @@ Next Steps:
 3. Sample will be collected and processed
 4. Results will be available in your account
 
-${is_urgent ? '⚠️ This is an URGENT test request. Please visit the lab immediately.' : ''}
-
 Lab Contact: ${lab.phone_number}
 
 Best regards,
@@ -293,7 +273,7 @@ MedLab System
     `;
 
     // Send WhatsApp notification to patient (with email fallback)
-    const whatsappMessage = `Hello ${patient.full_name.first},\n\nDr. ${req.user.username || 'Your doctor'} has ordered ${test_ids.length} test(s) for you${is_urgent ? ' (URGENT)' : ''}.\n\nLab: ${lab.lab_name}\nTests: ${tests.map(t => t.test_name).join(', ')}\nTotal Cost: ${subtotal} ILS\n\nNext Steps:\n1. Visit ${lab.lab_name} at your earliest convenience\n2. Bring your ID for verification\n3. Sample will be collected and processed\n4. Results will be available in your account\n\n${is_urgent ? '⚠️ This is an URGENT test request. Please visit the lab immediately.' : ''}\n\nLab Contact: ${lab.phone_number}\n\nBest regards,\nMedLab System`;
+    const whatsappMessage = `Hello ${patient.full_name.first},\n\nDr. ${req.user.username || 'Your doctor'} has ordered ${test_ids.length} test(s) for you.\n\nLab: ${lab.lab_name}\nTests: ${tests.map(t => t.test_name).join(', ')}\nTotal Cost: ${subtotal} ILS\n\nNext Steps:\n1. Visit ${lab.lab_name} at your earliest convenience\n2. Bring your ID for verification\n3. Sample will be collected and processed\n4. Results will be available in your account\n\nLab Contact: ${lab.phone_number}\n\nBest regards,\nMedLab System`;
 
     const whatsappSuccess = await sendWhatsAppMessage(
       patient.phone_number,
@@ -306,16 +286,15 @@ MedLab System
 
     if (!whatsappSuccess) {
       // Fallback to SMS if both WhatsApp and email fail
-      await sendSMS(patient.phone_number, `Dr. ${req.user.username} ordered ${test_ids.length} test(s) for you${is_urgent ? ' (URGENT)' : ''}. Visit ${lab.lab_name} for sample collection. Tests: ${tests.map(t => t.test_name).join(', ')}`);
+      await sendSMS(patient.phone_number, `Dr. ${req.user.username} ordered ${test_ids.length} test(s) for you. Visit ${lab.lab_name} for sample collection. Tests: ${tests.map(t => t.test_name).join(', ')}`);
     }
 
     res.status(201).json({
       success: true,
-      message: `✅ Test request submitted successfully${is_urgent ? ' as URGENT' : ''}. Patient notified via email and SMS.`,
+      message: `✅ Test request submitted successfully. Patient notified via email and SMS.`,
       order: {
         _id: newOrder[0]._id,
         status: newOrder[0].status,
-        is_urgent,
         patient: {
           name: `${patient.full_name.first} ${patient.full_name.last}`,
           patient_id: patient.patient_id
@@ -417,77 +396,6 @@ exports.getPatientTestHistory = async (req, res) => {
   }
 };
 
-// ✅ Mark Test Order as Urgent
-exports.markTestUrgent = async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const doctor_id = req.user.id;
-
-    const order = await Order.findById(orderId);
-    if (!order) return res.status(404).json({ message: 'Order not found' });
-
-    // Verify doctor has access to this order
-    if (order.doctor_id && order.doctor_id.toString() !== doctor_id) {
-      return res.status(403).json({ 
-        message: 'You can only mark your own orders as urgent' 
-      });
-    }
-
-    // Update order
-    order.remarks = 'urgent';
-    order.status = 'processing'; // Ensure it's being processed
-    await order.save();
-
-    // Update all order details to urgent status
-    await OrderDetails.updateMany(
-      { order_id: order._id, status: { $ne: 'completed' } },
-      { $set: { status: 'urgent' } }
-    );
-
-    // Notify lab owner
-    await Notification.create({
-      sender_id: doctor_id,
-      sender_model: 'Doctor',
-      receiver_id: order.owner_id,
-      receiver_model: 'Owner',
-      type: 'request',
-      title: '🚨 Order Marked as URGENT',
-      message: `Order ${order._id} has been marked as URGENT by doctor. Immediate processing required.`
-    });
-
-    // Notify all lab staff
-    const Staff = require('../models/Staff');
-    const labStaff = await Staff.find({ owner_id: order.owner_id });
-    
-    const staffNotifications = labStaff.map(staff => ({
-      sender_id: doctor_id,
-      sender_model: 'Doctor',
-      receiver_id: staff._id,
-      receiver_model: 'Staff',
-      type: 'request',
-      title: '🚨 URGENT Order',
-      message: `Order ${order._id} marked as URGENT. Please prioritize.`
-    }));
-
-    if (staffNotifications.length > 0) {
-      await Notification.insertMany(staffNotifications);
-    }
-
-    res.json({ 
-      success: true,
-      message: '✅ Order marked as urgent and notifications sent',
-      order: {
-        _id: order._id,
-        status: order.status,
-        remarks: order.remarks
-      }
-    });
-
-  } catch (err) {
-    console.error('Error marking order as urgent:', err);
-    res.status(500).json({ message: err.message });
-  }
-};
 // ✅ Get all notifications for Doctor and mark unread as read
 exports.getNotifications = async (req, res) => {
   try {
@@ -712,7 +620,7 @@ exports.getDashboard = async (req, res) => {
     const doctor_id = req.user.id;
 
     // Run all queries in parallel
-    const [totalPatients, totalOrders, pendingOrders, urgentOrders, completedOrders, unreadNotifications] = await Promise.all([
+    const [totalPatients, totalOrders, pendingOrders, completedOrders, unreadNotifications] = await Promise.all([
       // Total unique patients under this doctor
       Order.distinct('patient_id', { doctor_id }).then(arr => arr.length),
 
@@ -721,9 +629,6 @@ exports.getDashboard = async (req, res) => {
 
       // Pending/Processing orders
       Order.countDocuments({ doctor_id, status: { $in: ['pending', 'processing'] } }),
-
-      // Urgent orders
-      Order.countDocuments({ doctor_id, remarks: 'urgent', status: { $ne: 'completed' } }),
 
       // Completed orders
       Order.countDocuments({ doctor_id, status: 'completed' }),
@@ -745,7 +650,6 @@ exports.getDashboard = async (req, res) => {
         totalPatients,
         totalOrders,
         pendingOrders,
-        urgentOrders,
         completedOrders,
         unreadNotifications
       },
@@ -758,7 +662,6 @@ exports.getDashboard = async (req, res) => {
           `${order.owner_id.name.first} ${order.owner_id.name.last}` : 
           'N/A',
         status: order.status,
-        is_urgent: order.remarks === 'urgent',
         order_date: order.order_date
       }))
     });

@@ -148,6 +148,12 @@ class _AdminSidebarState extends State<AdminSidebar> {
                     index: 5,
                     badge: null,
                   ),
+                  _buildNavItem(
+                    icon: Icons.analytics,
+                    title: 'System Reports',
+                    index: 6,
+                    badge: null,
+                  ),
                 ]),
               ],
             ),
@@ -307,6 +313,12 @@ class _AdminSidebarState extends State<AdminSidebar> {
                     index: 5,
                     badge: null,
                   ),
+                  _buildNavItem(
+                    icon: Icons.analytics,
+                    title: 'System Reports',
+                    index: 6,
+                    badge: null,
+                  ),
                   //   icon: Icons.speed,
                   //   title: 'Performance',
                   //   index: 9,
@@ -418,6 +430,15 @@ class _AdminSidebarState extends State<AdminSidebar> {
             ? AppTheme.primaryBlue.withValues(alpha: 0.1)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
+        boxShadow: isSelected
+            ? [
+                BoxShadow(
+                  color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
       child: ListTile(
         leading: Icon(
@@ -453,6 +474,7 @@ class _AdminSidebarState extends State<AdminSidebar> {
         onTap: () => widget.onItemSelected(index),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       ),
     );
   }

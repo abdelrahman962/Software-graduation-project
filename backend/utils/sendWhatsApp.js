@@ -29,16 +29,16 @@ async function sendWhatsAppMessage(to, message, mediaUrls = [], useFallback = tr
     }
 
     const result = await client.messages.create(payload);
-    console.log('WhatsApp message sent successfully:', result.sid);
+    // console.log('WhatsApp message sent successfully:', result.sid);
     return true;
   } catch (error) {
     console.error('Failed to send WhatsApp message:', error.message);
 
     if (useFallback && emailSubject && emailHtml) {
-      console.log('Falling back to email...');
+      // console.log('Falling back to email...');
       try {
         await sendEmail(to, emailSubject, emailHtml); // Assuming sendEmail accepts email address
-        console.log('Email fallback sent successfully');
+        // console.log('Email fallback sent successfully');
         return true;
       } catch (emailError) {
         console.error('Email fallback also failed:', emailError.message);
@@ -113,16 +113,16 @@ async function sendWhatsAppTemplate(to, contentSid, contentVariables, useFallbac
     };
 
     const result = await client.messages.create(payload);
-    console.log('WhatsApp template message sent successfully:', result.sid);
+    // console.log('WhatsApp template message sent successfully:', result.sid);
     return true;
   } catch (error) {
     console.error('Failed to send WhatsApp template message:', error.message);
 
     if (useFallback && emailSubject && emailHtml) {
-      console.log('Falling back to email...');
+      // console.log('Falling back to email...');
       try {
         await sendEmail(to, emailSubject, emailHtml);
-        console.log('Email fallback sent successfully');
+        // console.log('Email fallback sent successfully');
         return true;
       } catch (emailError) {
         console.error('Email fallback also failed:', emailError.message);

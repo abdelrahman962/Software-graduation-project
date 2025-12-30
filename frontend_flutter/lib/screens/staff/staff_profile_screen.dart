@@ -55,9 +55,9 @@ class _StaffProfileScreenState extends State<StaffProfileScreen> {
       final profile = await StaffApiService.getProfile();
       setState(() {
         _profileData = profile;
-        _firstNameController.text = profile['name']?['first'] ?? '';
-        _middleNameController.text = profile['name']?['middle'] ?? '';
-        _lastNameController.text = profile['name']?['last'] ?? '';
+        _firstNameController.text = profile['full_name']?['first'] ?? '';
+        _middleNameController.text = profile['full_name']?['middle'] ?? '';
+        _lastNameController.text = profile['full_name']?['last'] ?? '';
         _emailController.text = profile['email'] ?? '';
         _phoneController.text = profile['phone_number'] ?? '';
         _streetController.text = profile['address']?['street'] ?? '';
@@ -78,7 +78,7 @@ class _StaffProfileScreenState extends State<StaffProfileScreen> {
   Future<void> _updateProfile() async {
     try {
       final data = {
-        'name': {
+        'full_name': {
           'first': _firstNameController.text,
           'middle': _middleNameController.text,
           'last': _lastNameController.text,
@@ -357,8 +357,10 @@ class _StaffProfileScreenState extends State<StaffProfileScreen> {
                               _profileData?['username'] ?? 'N/A',
                             ),
                             _buildInfoRow(
-                              'Position',
-                              _profileData?['position'] ?? 'N/A',
+                              'Salary',
+                              _profileData?['salary'] != null
+                                  ? '\$${_profileData!['salary']}'
+                                  : 'N/A',
                             ),
                             _buildInfoRow(
                               'Employee Number',

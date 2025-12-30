@@ -55,4 +55,7 @@ router.get('/system-health', adminController.getSystemHealth);
 router.get('/realtime-metrics', adminController.getRealTimeMetrics);
 router.get('/alerts', adminController.getAlerts);
 
+// 📊 Reports routes
+router.get('/reports', adminController.generateReports);
+
 module.exports = router;
